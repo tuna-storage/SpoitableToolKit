@@ -1,0 +1,12 @@
+<Project>
+
+  <!--
+    TargetFrameworks（複数形）で書いた project の、**外側の build** が読むもの。パッケージの build/ は内側（TargetFramework ごと）の build でしか
+    読まれないので、外側には zip の target が無い。そのままだと「target が無い」（MSB4057）としか出ないので、何を直すかを言って止める。
+  -->
+  <Target Name="SpoitablePackModule">
+    <Error Code="STK025"
+           Text="$(MSBuildProjectName) has TargetFrameworks ($(TargetFrameworks)), and a module is built for one target framework. Write &lt;TargetFramework&gt; (singular, for example net10.0) in the csproj instead, then pack again." />
+  </Target>
+
+</Project>

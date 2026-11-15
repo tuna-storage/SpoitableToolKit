@@ -1,0 +1,92 @@
+/* パネルの骨格。**色はここで決めない** — 値は全部トークン（`/_host/theme.css`）から引く。
+ *
+ * **テーマより先に読む。** CSS は後から来た方が勝つので、この順でないと
+ * テーマが骨格を上書きできない（サイドバーを横並びにしようとしても
+ * ここの `flex-direction: column` に負けて、`!important` が要る）。
+ */
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: var(--font-weight) var(--font-size)/1.5 var(--font-ui);
+  }
+  .page { padding: 1.1em 1.6em; }
+  h1 { margin: 0 0 .8em; font-size: 1.5em; font-weight: 650; letter-spacing: -.015em; }
+  h2 {
+    margin: 1.6em 0 .6em; font-size: .78em; font-weight: 600; letter-spacing: .04em;
+    color: var(--faint);
+  }
+
+  .line {
+    display: flex; gap: .6em; align-items: center; position: relative;
+  }
+  .line .ico { position: absolute; left: .75em; width: 1.1em; height: 1.1em; color: var(--faint); pointer-events: none; }
+  input[type=text] {
+    flex: 1; min-width: 0; height: 2.15em; font: inherit; font-size: .88em; padding: 0 .75em 0 2.4em;
+    border: 1px solid var(--border); border-radius: .45em; background: var(--surface); color: var(--fg);
+    outline: none;
+  }
+  input[type=text]:focus { border-color: var(--accent); }
+  input[type=text]::placeholder { color: var(--faint); }
+
+  /* 欄と ✕ の箱。✕ を欄の右端に重ねる（`.line` に重ねると「解決」の上に乗る）。 */
+  .field { flex: 1; min-width: 0; display: flex; align-items: center; position: relative; }
+  .field input[type=text] { padding-right: 2.4em; }
+
+  /* 欄を空にする ✕。**押せる所は欄の高さいっぱいの正方形** — VR のレーザーでも当てやすいように。
+     空のときは出さない。`:placeholder-shown` なので、失敗の行の「解決」が value を直に書いたときにも追いつく。 */
+  button.clear {
+    position: absolute; right: 0; top: 0; width: 2.15em; padding: 0;
+    border: 0; background: none; color: var(--faint);
+  }
+  button.clear:hover:not(:disabled) { background: none; border: 0; color: var(--fg); }
+  button.clear svg { width: 1.1em; height: 1.1em; }
+  #url:placeholder-shown + .clear { display: none; }
+
+  button {
+    height: 2.15em; padding: 0 .75em; font: inherit; font-size: .88em; cursor: pointer;
+    border: 1px solid var(--border); border-radius: .45em; background: var(--surface); color: var(--fg);
+    display: inline-flex; align-items: center; justify-content: center; white-space: nowrap;
+  }
+  button:hover:not(:disabled) { background: var(--hover); border-color: var(--faint); }
+  button:disabled { color: var(--muted); cursor: default; }
+  button.primary {
+    background: var(--accent); color: var(--on-accent); border: 0; font-weight: 600;
+  }
+  button.primary:hover:not(:disabled) { background: var(--accent); border: 0; filter: brightness(1.08); }
+  button.primary:disabled { opacity: .6; color: var(--on-accent); }
+
+  .msg { margin: .7em 0 0; color: var(--muted); font-size: .88em; }
+  .msg:empty { display: none; }
+  .msg.bad { color: var(--bad); }
+
+  /* 解決結果とエラー一覧は同じ箱。 */
+  .streams, .failures {
+    border: 1px solid var(--border); border-radius: .55em; background: var(--surface);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .streams:empty { display: none; }
+  .streams { margin-top: .9em; }
+
+  .stream, .failure {
+    display: flex; align-items: center; gap: .8em; padding: .6em .9em;
+  }
+  .stream + .stream, .failure + .failure { border-top: 1px solid var(--soft); }
+  .stream .q { min-width: 12em; font-size: .88em; }
+  .stream.hls .q { color: var(--tone-teal); font-weight: 600; }
+  .stream .note { color: var(--muted); font-size: .78em; white-space: nowrap; }
+  .stream .u {
+    flex: 1; min-width: 0; color: var(--muted); font-family: var(--font-mono); font-size: .84em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  .failure .n {
+    flex: none; min-width: 2.4em; text-align: center; font-size: .78em; font-weight: 600;
+    color: var(--tone-red); font-variant-numeric: tabular-nums;
+    background: color-mix(in srgb, var(--tone-red) 14%, transparent); border-radius: var(--radius-pill);
+    padding: .1em .5em;
+  }
+  .failure .u { flex: 1; min-width: 0; font-size: .88em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .failure .why { flex: none; max-width: 35%; color: var(--faint); font-size: .78em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .failure .at { flex: none; color: var(--muted); font-family: var(--font-mono); font-size: .84em; font-variant-numeric: tabular-nums; }
+  .empty { padding: 1.4em; text-align: center; color: var(--faint); font-size: .88em; }

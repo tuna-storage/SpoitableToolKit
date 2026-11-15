@@ -1,0 +1,1546 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<!-- ホストの窓口を呼ぶための token。シェル（index.html）と同じく、配信時にスキームハンドラが差し替える。 -->
+<script>window.__stkToken = '__STK_TOKEN__';</script>
+<title>SpoitableToolKit (wrist)</title>
+<!-- 部品（`spoitable-` の class だけに当たる）→ 色・影・フォントの順。手首の骨格は下の style（自分の .tile・.empty はここだけのもの）。 -->
+<link rel="stylesheet" href="/_host/ui.css">
+<link rel="stylesheet" href="/_host/theme.css">
+<style>
+  /* 手首の絵（1120×240）。左が手首の板、右が通知の板。
+     手首の板は x = 373（WristHost.Axis）が真ん中で（幅は 6 つ分で固定）、縦は絵の真ん中に置く。何も描いていない所は透ける（VR の browser は背景が透明）。
+     部品は固定の大きさで、板は中身に合わせて詰める（デザインの寸法のままだと、タイルが板いっぱいに広がる）。 */
+  html, body {
+    margin: 0;
+    width: 1000px;
+    height: 240px;
+    overflow: hidden;
+    background: transparent;
+    color: var(--fg);
+    font-family: var(--font-ui);
+    font-weight: 500;
+    line-height: 1.3;
+    user-select: none;
+  }
+
+  button { font: inherit; color: inherit; cursor: pointer; }
+
+  .ic { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+  .board {
+    position: absolute;
+    top: 32px;
+    height: 176px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    /* 左右は 10 px — 枠と合わせて 12 px。6 つ分で 746 px = 軸（373）の 2 倍で、絵の左端に収まる（14 px だと 2 px 切れる）。 */
+    padding: 12px 10px;
+    border: 2px solid var(--soft);
+    border-radius: 20px;
+    background: var(--bg);
+  }
+
+  /* 帯。状態の口の手首の分（「手首に出さないもの」で絞ってある）。入りきらない分は「ほか N」。 */
+  .strip { flex: none; height: 40px; display: flex; gap: 6px; }
+  .items { flex: 1; min-width: 0; display: flex; gap: 6px; }
+
+  .item {
+    flex: 0 0 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--fg);
+    white-space: nowrap;
+  }
+
+  /* いまのワールドだけは伸び縮みして、長い名前は … で切る。 */
+  .item.wide { flex: 1 1 auto; }
+  .item .ic { width: 15px; height: 15px; color: var(--muted); }
+  .item .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .item .v { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 16px; font-variant-numeric: tabular-nums; }
+  .item.wide .v { font-size: 13px; }
+  .item[data-state="ok"] .dot { color: var(--good); }
+  .item[data-state="warn"] .dot { color: var(--warn); }
+  .item[data-state="bad"] .dot { color: var(--bad); }
+  .item[data-state="off"] .dot { color: var(--faint); }
+  .item[data-state="off"] .v { color: var(--muted); }
+  .item.more { flex: none; color: var(--muted); font-size: 13px; }
+
+  .lock {
+    flex: none;
+    width: 40px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .lock .ic { width: 17px; height: 17px; }
+
+  /* ショートカット。**大きさは固定**（112 px 幅）で、列はいつも 6 つ分（足りないときは左に詰まる）。7 つ目からは横へ送る（横に引くか、下の点）。
+     タイルは並び（#tiles）の上に置き場の位置で並び、並びごと横に動かしてページを送る。いまのページと前後のページのタイルが並びにある。
+     見える窓（.pager）は板の左右の余白まで広げて切る — 引いている間、隣のページのタイルが板の縁まで見える。
+     **切るのは clip**（hidden だと巻ける箱になり、切れているタイルに focus が移ると、ブラウザが窓を巻いて並びがずれたままになる）。 */
+  .deck { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+  .pager { position: relative; flex: 1; min-height: 0; margin: 0 -10px; overflow: clip; }
+  .tiles { position: absolute; top: 0; bottom: 0; left: 10px; }
+
+  .tile {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 112px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--surface);
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-size: 13px;
+  }
+  .tile .ic { width: 24px; height: 24px; stroke-width: 1.8; }
+  .tile .glyph { font-size: 22px; line-height: 1; }
+  /* タイルの中身（モジュールが書く短い文字）。色は状態から（帯の点と同じ）。無ければ行ごと出さない。 */
+  .tile .val { font-size: 15px; font-weight: 600; line-height: 1; color: var(--fg); max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile .val:empty { display: none; }
+  .tile .val[data-state="ok"] { color: var(--good); }
+  .tile .val[data-state="warn"] { color: var(--warn); }
+  .tile .val[data-state="bad"] { color: var(--bad); }
+  .tile .val[data-state="off"] { color: var(--muted); }
+  .tile .pill { position: absolute; left: 50%; bottom: 6px; width: 22px; height: 3px; margin-left: -11px; border-radius: 2px; background: transparent; }
+
+  /* タイルに描くページ（モジュールが名乗ったもの。IWristShortcut.Page）。**中はページが描くだけ** — 押す・ドラッグはタイルが受ける
+     （押すだけのタイルは click、ドラッグだけのタイルは C# へ送る。iframe には届かない）。地と角はタイルのまま（ページが背景を描かなければ透けて見える）。開いている印の枠は iframe の上に重ねる（タイルの inset の影は iframe に隠れる）。 */
+  .tile.page { overflow: hidden; }
+  .tile.page iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; pointer-events: none; }
+  /* 押せる形にしておく（手首は CEF の手の形を見てコントローラーを震わせる。ページのタイルは div なので、ボタンの cursor が付かない）。 */
+  .tile.runs { cursor: pointer; }
+  .tile.page.on::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 2px var(--accent); pointer-events: none; }
+  .tile.page .pill { pointer-events: none; }
+
+  /* 乗せた・押した手応え。
+     帯の項目も押せる物は同じ。押している間だけ少し沈む。 */
+  .tile:hover, button.item:hover { background: var(--raised); color: var(--fg); }
+  .tile:active, button.item:active { transform: scale(.96); }
+
+  /* いま空間の窓で開いているもの。もう一度押すと閉じる。**押した瞬間に塗る**（openView）。 */
+  .tile.on { background: var(--raised); color: var(--fg); box-shadow: inset 0 0 0 2px var(--accent); }
+  .tile.on .pill { background: var(--accent); }
+
+  .dots { flex: none; height: 6px; display: flex; justify-content: center; gap: 6px; }
+  .dots button { position: relative; width: 6px; height: 6px; padding: 0; border: 0; border-radius: 3px; background: var(--border); }
+  .dots button.on { width: 18px; background: var(--fg); }
+  /* 点の当たり。**見た目は 6 px のまま**、縦は 24 px（上はタイルとの間、下は板の余白）、横は点の左右 9 px ずつ。
+     横は隣の点の当たりと重なるので、押した点は当たりの持ち主ではなく、押した所にいちばん近い点で決める（el.dots の click）。 */
+  .dots button::before { content: ''; position: absolute; left: -9px; right: -9px; top: -6px; bottom: -12px; }
+
+  /* ページを引いている間は、指の下のタイルを押した形・乗せた形・手の形にしない（押しにはならない。ホストは手の形を見てコントローラーを震わせる）。 */
+  .board.swiping .tile, .board.swiping .dots button { cursor: default; }
+  .board.swiping .tile:active { transform: none; }
+  .board.swiping .tile:hover:not(.on) { background: var(--surface); color: var(--muted); }
+
+  body.layout .board { border: 2px dashed var(--accent); }
+  body:not(.layout) .layout-only, body.layout .normal-only { display: none !important; }
+
+  .lhead { flex: none; height: 18px; display: flex; align-items: center; gap: 6px; padding: 0 2px; color: var(--muted); font-size: 12px; }
+  .lhead .ic { width: 14px; height: 14px; }
+
+  .lmid { flex: 1; min-height: 0; display: grid; grid-template-columns: 72px minmax(0, 1fr) 72px; gap: 10px; }
+  .lmid > button.step { border: 0; border-radius: 12px; background: var(--surface); color: var(--fg); display: flex; align-items: center; justify-content: center; }
+  .lmid > button.step .ic { width: 20px; height: 20px; }
+  .lsize { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+  .lsize .k { color: var(--muted); font-size: 11px; }
+  .lsize .n { font-family: var(--font-mono); font-size: 20px; line-height: 1; font-variant-numeric: tabular-nums; }
+  .lsize .reset { height: 30px; margin-top: 4px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 2px solid var(--soft); border-radius: 9px; background: var(--raised); font-size: 12px; }
+  .lsize .reset .ic { width: 13px; height: 13px; }
+
+  .ldone { flex: none; height: 36px; border: 0; border-radius: 11px; background: var(--accent); color: var(--on-accent); font-size: 14px; }
+
+  /* 配置を変えている間は、押せない物を手の形にしない（ホストは手の形を見てコントローラーを震わせる）。 */
+  body.layout .notes button { cursor: default; }
+
+  /* 通知は 4 件。**高さは手首の板に合わせない**（縦の真ん中だけそろえる）。 */
+  .notes {
+    position: absolute;
+    top: 6px;
+    width: 352px;
+    height: 228px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px;
+    border: 2px solid var(--soft);
+    border-radius: 20px;
+    background: var(--bg);
+    overflow: hidden;
+  }
+  .notes.asking { border-color: var(--accent); }
+  body.layout .notes { opacity: .4; }
+
+  /* **上下に引いて辿る**（見えるのは 4 件、覚えているのは NOTES_KEPT 件）。巻き棒は出さない（指では掴めない細さになる）。
+     続きがある側の端を薄くして、まだあることを見せる。 */
+  #noteList {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+  #noteList::-webkit-scrollbar { display: none; }
+  #noteList.below { -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 20px), transparent); mask-image: linear-gradient(to bottom, black calc(100% - 20px), transparent); }
+  #noteList.above { -webkit-mask-image: linear-gradient(to top, black calc(100% - 20px), transparent); mask-image: linear-gradient(to top, black calc(100% - 20px), transparent); }
+  #noteList.above.below {
+    -webkit-mask-image: linear-gradient(to bottom, transparent, black 20px, black calc(100% - 20px), transparent);
+    mask-image: linear-gradient(to bottom, transparent, black 20px, black calc(100% - 20px), transparent);
+  }
+
+  .note {
+    position: relative;
+    flex: none;
+    height: 46px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px 0 6px;
+    border: 2px solid var(--soft);
+    border-radius: 12px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .note.old { opacity: .88; }
+  .note.fresh { border-color: var(--border); }
+  .note .text { flex: 1; min-width: 0; }
+  .note .title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .note .meta { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .note .age { flex: none; font-size: 11px; color: var(--faint); }
+  .note .bar { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--accent); transform-origin: left; }
+  .note.fresh .bar { animation: drain 6s linear forwards; }
+  .note:not(.fresh) .bar { display: none; }
+  @keyframes drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
+  .empty { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--faint); font-size: 12px; }
+  .empty .ic { width: 14px; height: 14px; }
+
+  /* 種類の角四角。**色は color で運ぶ**（地は currentColor を薄めたもの。シェルと同じ作法）。 */
+  .sq { flex: none; width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--tone-gray); background: color-mix(in srgb, currentColor 16%, transparent); }
+  .sq .ic { width: 16px; height: 16px; }
+  .sq[data-tone="gray"] { color: var(--tone-gray); }
+  .sq[data-tone="accent"] { color: var(--accent); }
+  .sq[data-tone="green"] { color: var(--tone-green); }
+  .sq[data-tone="red"] { color: var(--tone-red); }
+  .sq[data-tone="amber"] { color: var(--tone-amber); }
+  .sq[data-tone="blue"] { color: var(--tone-blue); }
+  .sq[data-tone="purple"] { color: var(--tone-purple); }
+  .sq[data-tone="teal"] { color: var(--tone-teal); }
+  .sq[data-tone="rose"] { color: var(--tone-rose); }
+
+  /* 答えを待つ通知。**通知の板の下側を覆う**（左の手首は絶対に邪魔しない — 人が頻繁に操作するから）。
+     境目は線ではなく**ぼかし**で、下へ行くほどはっきりする（ease-in）。残り時間は板の下端の線。 */
+  .ask {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 10px;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 0 10px 10px;
+    background: color-mix(in srgb, var(--bg) 94%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, color-mix(in srgb, black 6%, transparent) 14px, color-mix(in srgb, black 25%, transparent) 28px, color-mix(in srgb, black 60%, transparent) 42px, black 56px);
+    mask-image: linear-gradient(to bottom, transparent 0, color-mix(in srgb, black 6%, transparent) 14px, color-mix(in srgb, black 25%, transparent) 28px, color-mix(in srgb, black 60%, transparent) 42px, black 56px);
+  }
+  .ask .head { display: flex; align-items: center; gap: 10px; }
+  .ask .sq { width: 34px; height: 34px; border-radius: 9px; }
+  .ask .sq .ic { width: 18px; height: 18px; }
+  .ask .text { flex: 1; min-width: 0; }
+  .ask .title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ask .body { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ask .acts { display: flex; gap: 8px; }
+  .ask .acts button { height: 40px; border-radius: 11px; font-size: 13px; font-weight: 600; }
+  .ask .no { flex: 1; border: 2px solid var(--border); background: var(--surface); }
+  .ask .yes { flex: 1.5; border: 0; background: var(--accent); color: var(--on-accent); }
+  .ask .life { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--accent); transform-origin: left; }
+
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position: absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-lock" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></symbol>
+    <symbol id="i-grip" viewBox="0 0 24 24"><path d="M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></symbol>
+    <symbol id="i-log" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-dash" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></symbol>
+    <symbol id="i-world" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+    <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 9M22 21a7 7 0 0 0-4-6.3"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="m10 9.2 5 2.8-5 2.8z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-join" viewBox="0 0 24 24"><circle cx="10" cy="8" r="4"/><path d="M3 20a7 7 0 0 1 14 0M19 8v6M16 11h6"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><circle cx="10" cy="8" r="4"/><path d="M3 20a7 7 0 0 1 14 0M16 11h6"/></symbol>
+    <symbol id="i-fail" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="m10 9.2 5 2.8-5 2.8z"/><path d="M3 3l18 18"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 10v4M12 17.5v.01"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></symbol>
+  </defs>
+</svg>
+
+<div class="board" id="board">
+  <div class="strip normal-only">
+    <div class="items" id="items"></div>
+    <button class="lock" id="unlock" data-i18n-title="host.wrist.layout"><svg class="ic"><use href="#i-lock"/></svg></button>
+  </div>
+  <div class="deck normal-only">
+    <div class="pager"><div class="tiles" id="tiles"></div></div>
+    <div class="dots" id="dots" hidden></div>
+  </div>
+
+  <div class="lhead layout-only"><svg class="ic"><use href="#i-grip"/></svg><span data-i18n="host.wrist.grab"></span></div>
+  <div class="lmid layout-only">
+    <button class="step" id="smaller" data-i18n-title="host.wrist.smaller"><svg class="ic"><use href="#i-minus"/></svg></button>
+    <div class="lsize">
+      <span class="k" data-i18n="host.wrist.size"></span>
+      <span class="n" id="width"></span>
+      <button class="reset" id="reset"><svg class="ic"><use href="#i-reset"/></svg><span data-i18n="host.wrist.reset"></span></button>
+    </div>
+    <button class="step" id="larger" data-i18n-title="host.wrist.larger"><svg class="ic"><use href="#i-plus"/></svg></button>
+  </div>
+  <button class="ldone layout-only" id="done" data-i18n="common.ui.done"></button>
+</div>
+
+<aside class="notes" id="notes" aria-live="polite">
+  <div id="noteList"></div>
+  <div class="empty" id="noteEmpty"><svg class="ic"><use href="#i-bell"/></svg><span data-i18n="host.bell.empty"></span></div>
+  <div class="ask" id="ask" role="alertdialog" hidden>
+    <div class="head">
+      <span class="sq" id="askSq"></span>
+      <div class="text"><div class="title" id="askTitle"></div><div class="body" id="askBody"></div></div>
+    </div>
+    <div class="acts">
+      <button class="no" id="askNo" data-i18n="common.ui.close"></button>
+      <button class="yes" id="askYes"></button>
+    </div>
+    <span class="life" id="askLife"></span>
+  </div>
+</aside>
+
+<script>
+// 手首の板。**正は全部 C# 側**で、ここは写すだけ（シェルの index.html と同じ作法）。
+// 受け取る報せはホストが絞って送ってくる（WristHost.Channels）。**wristLayout と wristView は別**で、
+// VrLoop がこのページにだけ直に送る（Channels を通らないので、そこに無くても届く）。
+
+const AXIS = 373;        // 手首の真ん中（WristHost.Axis と同じ値。手首の板の幅の半分）
+const MAX_COLS = 6;      // ショートカットを横に並べる数。超えたら送る。**板の幅はこの数で固定**
+const TILE_STEP = 122;   // 並びの上の列の間隔（タイル 112 と間 10）
+const PAGE_GAP = 24;     // 引いている間に見えるページとページの間（タイルの間より広くして、ページの切れ目を見せる）
+const GAP = 12;          // 手首の板と通知の板の間
+const FRESH_MS = 6000;   // 新しい通知に線を出しておく時間
+
+const el = Object.fromEntries(
+  ['board', 'items', 'unlock', 'tiles', 'dots', 'smaller', 'width', 'larger', 'reset', 'done',
+    'notes', 'noteList', 'noteEmpty', 'ask', 'askSq', 'askTitle', 'askBody', 'askNo', 'askYes', 'askLife']
+    .map(id => [id, document.getElementById(id)]));
+
+// token を挟むのはここ 1 か所（シェルと同じ）。読んだら消す。
+const bridge = (() => {
+  const token = window.__stkToken;
+  delete window.__stkToken;
+
+  const call = name => (...args) => stkHost[name](token, ...args);
+
+  return {
+    getStatus: call('getStatus'),
+    getStrings: call('getStrings'),
+    getModules: call('getModules'),
+    queryLog: call('queryLog'),
+    answerNotification: call('answerNotification'),
+    toggleVrWindow: call('toggleVrWindow'),
+    getShortcuts: call('getShortcuts'),
+    pressShortcut: call('pressShortcut'),
+    shortcutPointer: call('shortcutPointer'),
+    callModule: call('callModule'),
+    getVrWindowView: call('getVrWindowView'),
+    resetWristPosition: call('resetWristPosition'),
+    setWristLayout: call('setWristLayout'),
+    resizeWrist: call('resizeWrist'),
+  };
+})();
+
+let STRINGS = {};
+
+function t(key, ...args) {
+  const text = Object.prototype.hasOwnProperty.call(STRINGS, key) ? STRINGS[key] : key;
+  return args.length ? text.replace(/\{(\d+)\}/g, (whole, index) => args[index] ?? whole) : text;
+}
+
+async function loadStrings() {
+  const received = await bridge.getStrings();
+  STRINGS = JSON.parse(received.strings || '{}');
+  document.documentElement.lang = received.language || 'en';
+
+  for (const node of document.querySelectorAll('[data-i18n]')) node.textContent = t(node.dataset.i18n);
+  for (const node of document.querySelectorAll('[data-i18n-title]')) node.title = t(node.dataset.i18nTitle);
+}
+
+const SVG = 'http://www.w3.org/2000/svg';
+
+function icon(id) {
+  const svg = document.createElementNS(SVG, 'svg');
+  svg.setAttribute('class', 'ic');
+  const use = document.createElementNS(SVG, 'use');
+  use.setAttribute('href', '#' + id);
+  svg.appendChild(use);
+  return svg;
+}
+
+/** モジュールが渡した線のアイコン（パスの d だけ。ホストが字を検めてある）。 */
+function pathIcon(d) {
+  const svg = document.createElementNS(SVG, 'svg');
+  svg.setAttribute('class', 'ic');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  const path = document.createElementNS(SVG, 'path');
+  path.setAttribute('d', d);
+  svg.appendChild(path);
+  return svg;
+}
+
+function cell(className, text) {
+  const node = document.createElement('div');
+  node.className = className;
+  node.textContent = text;
+  return node;
+}
+
+let modules = [];
+const moduleById = id => modules.find(p => p.id === id);
+const moduleName = id => (STRINGS[id + '.name'] ?? moduleById(id)?.name ?? id);
+
+// 本体の分は印が決まっている。モジュールの分はサイドバーと同じ線のアイコン。
+
+const HOST_ICONS = { 'host': 'i-log', 'host.world': 'i-world', 'host.people': 'i-people', 'host.video': 'i-play', 'host.clock': 'i-clock' };
+let statusItems = [];
+/** 手首の板の幅。<b>6 つ分で固定</b>（タイル 112・間 10・左右 12）。 */
+const boardWidth = 24 + 112 * MAX_COLS + 10 * (MAX_COLS - 1);
+
+/** 帯に入る数。**幅で決まる**（400 で 3 つ、112 増えるごとに 1 つ）。入りきらない分は「ほか N」に畳む。 */
+function fits(width) {
+  return Math.max(1, 3 + Math.floor((width - 400) / 112));
+}
+
+function renderStatus(items) {
+  statusItems = items ?? [];
+  const room = fits(boardWidth);
+  const shown = statusItems.length > room ? statusItems.slice(0, room - 1) : statusItems;
+  const rest = statusItems.length - shown.length;
+
+  const nodes = shown.map(item => {
+    // **押すとそのモジュールの画面が空間の窓で開く**。本体の分は開く先が無いので押せない形にする。
+    const clickable = !item.id.startsWith('host');
+    const node = document.createElement(clickable ? 'button' : 'div');
+    node.className = 'item' + (item.id === 'host.world' ? ' wide' : '');
+    node.dataset.id = item.id;
+    node.dataset.state = item.state;
+    if (item.note) node.title = item.note;
+
+    const module = moduleById(item.id);
+    const svg = HOST_ICONS[item.id] ? icon(HOST_ICONS[item.id]) : module?.iconPath ? pathIcon(module.iconPath) : null;
+    if (item.state !== 'ok' || !svg) node.appendChild(Object.assign(document.createElement('i'), { className: 'dot' }));
+    if (svg) node.appendChild(svg);
+    node.appendChild(cell('v', item.text));
+
+    if (clickable) node.addEventListener('click', () => { if (!inLayout()) openView(item.id); });
+    return node;
+  });
+
+  if (rest > 0) nodes.push(cell('item more', t('host.wrist.more', rest)));
+  el.items.replaceChildren(...nodes);
+}
+
+// 並べられるものは C# の台帳（getShortcuts）。**台帳に無い名前は黙って並ばない**（入っていないモジュール・消えたショートカット）。
+// 本体の分は最初から持っておく（台帳を引く前・引けないときも、本体のタイルは描ける）。
+
+let catalogue = [
+  { key: 'log', name: 'host.nav.log', hostIcon: 'i-log', view: 'log' },
+  { key: 'settings', name: 'host.nav.settings', hostIcon: 'i-gear', view: 'settings' },
+  { key: 'dashboard', name: 'host.nav.dashboard', hostIcon: 'i-dash', view: 'dashboard' },
+];
+
+let shortcuts = [];
+let page = 0;
+let viewing = null;
+
+const known = key => catalogue.find(s => s.key === key) ?? null;
+
+/** 名前。辞書のキーなら引く。無ければ作者の付けた名前、それも無ければ字のまま。 */
+const shortcutName = s => (Object.prototype.hasOwnProperty.call(STRINGS, s.name) ? STRINGS[s.name] : s.fallback ?? s.name);
+
+function shortcutIcon(s) {
+  if (s.hostIcon) return icon(s.hostIcon);
+  if (s.iconPath) return pathIcon(s.iconPath);
+  return cell('glyph', s.icon || shortcutName(s).slice(0, 1));
+}
+
+/** タイルの中身の行。**中身が変わったときはこの行だけ書き換える**（タイルを作り直すと、乗せている指の :hover が外れる）。 */
+function fillValue(node, s) {
+  node.textContent = s.text ?? '';
+  node.dataset.state = s.state ?? 'off';
+}
+
+/** 1 ページの幅（6 つ分のタイルと間）と、並びの上でページが並ぶ間隔。 */
+const PAGE_WIDTH = 112 * MAX_COLS + 10 * (MAX_COLS - 1);
+const PAGE_STRIDE = PAGE_WIDTH + PAGE_GAP;
+
+const pageCount = () => Math.max(1, Math.ceil(shortcuts.length / MAX_COLS));
+
+/**
+ * 並べ直す。**出ているタイルは作り直さない**（同じ名前・同じ台帳のものは、そのまま使う。並びが同じなら DOM も動かさない）。
+ * タイルのページ（iframe）は DOM から外すと読み込み直すので、作り直すと設定を保存するたびにページが頭から描き直しになる。
+ * 乗せている指の :hover も外れない。<b><code>rebuild</code> なら全部作り直す</b>（言語が変わった — 名前は作るときに書くので）。
+ * <b>並びに置くのは、いまのページと前後のページのタイル</b> — 引いている間に隣のページが見え、送っても残るタイルは動かないので、
+ * 送って戻っても読み込み直さない。それより遠いページのタイルは外す。引きの途中・滑りの途中なら捨てる（並びが変わったかもしれない）。
+ */
+function renderShortcuts(ids, rebuild = false) {
+  if (ids) shortcuts = ids.filter(known);
+  dropPageSwipe();
+
+  const pages = pageCount();
+  page = Math.min(page, pages - 1);
+  const first = Math.max(0, page - 1) * MAX_COLS;
+  const end = Math.min(shortcuts.length, (page + 2) * MAX_COLS);
+
+  // **板の幅は 6 つ分で決めてある**（数で伸び縮みさせない）。
+  // 足りないときは**左に詰める** — 足しても今あるタイルが動かない・ページを送っても 1 番目が同じ所に来る（VR では手が位置で覚える）。
+  // タイルは 112 px・間 10 px・左右の余白と枠 12 px（6 つで 746 px = AXIS の 2 倍）。
+  el.board.style.width = boardWidth + 'px';
+  el.board.style.left = (AXIS - boardWidth / 2) + 'px';
+  el.notes.style.left = (AXIS + boardWidth / 2 + GAP) + 'px';
+
+  // 使い回せるもの。同じ名前が 2 つ並ぶこともある（設定を手で書いたとき）ので、1 つ使ったら外す。
+  const spare = rebuild ? [] : [...el.tiles.children];
+  const wanted = [];
+  for (let at = first; at < end; at++) {
+    const key = shortcuts[at];
+    const s = known(key);
+    // 置き場は並びの上の位置（ページごとに PAGE_STRIDE、列ごとに TILE_STEP）。ページを送るときは並びごと動かす。
+    const left = (Math.floor(at / MAX_COLS) * PAGE_STRIDE + (at % MAX_COLS) * TILE_STEP) + 'px';
+    const same = node => node.dataset.id === key && node._s === s;
+    // 同じ名前が 2 つあるなら、同じ置き場にあったものを先に使う（別の置き場のものを使うと、残るはずのタイルが動いて読み込み直しになる）。
+    let found = spare.findIndex(node => same(node) && node.style.left === left);
+    if (found < 0) found = spare.findIndex(same);
+    const node = found >= 0 ? spare.splice(found, 1)[0] : buildTile(key, s);
+    node.style.left = left;
+    wanted.push(node);
+  }
+
+  // 先に要らないものを外してから並べる。外す前に並べると、残るタイルまで動いて（iframe なら）読み込み直しになる。
+  for (const node of rebuild ? [...el.tiles.children] : spare) {
+    // 押している最中のタイルを外す（ページを送った・設定が変わった）。離しはもう届かないので、途切れたことにする。
+    if (pointing?.tile === node) cancelPointer();
+    node.remove();
+  }
+  wanted.forEach((node, i) => {
+    if (el.tiles.children[i] !== node) {
+      // 並びが変わって**動かしたタイルのページは読み込み直しになる**。読み終わる（ready が届く）までは送らない — 送っても消える。
+      // 新しく作ったものは、もとから読み込み中。
+      const tile = node.isConnected ? node.querySelector(':scope > iframe')?._tile : null;
+      if (tile) tile.ready = false;
+      el.tiles.insertBefore(node, el.tiles.children[i] ?? null);
+    }
+    const framed = framedBy(node._s);
+    const on = !!framed && viewing === framed;
+    node.classList.toggle('on', on);
+    node.setAttribute('aria-pressed', String(on));
+  });
+
+  showPull(0);
+
+  el.dots.hidden = pages <= 1;
+  el.dots.replaceChildren(...Array.from({ length: pages }, (_, i) => {
+    const dot = document.createElement('button');
+    dot.className = i === page ? 'on' : '';
+    return dot;
+  }));
+
+  // 幅が変われば帯に入る数も変わる。
+  renderStatus(statusItems);
+}
+
+/**
+ * 空間の窓がどの画面を出している間、このタイルに枠を付けるか。開くタイルは開く画面。モジュールが登録したタイルは、名乗った画面
+ * （IWristShortcut.MarkedPanel。開くのはモジュールの処理なので、押す前に開く先を知るにはこれしかない）。どちらも無ければ枠は付かない。
+ */
+const framedBy = s => s.view ?? s.marked ?? null;
+
+/** タイルを 1 つ作る。ページを持つものは iframe（中はページが描く）、ほかはボタン（アイコン・中身・名前）。 */
+function buildTile(key, s) {
+  if (s.page) return buildPageTile(key, s);
+
+  const button = document.createElement('button');
+  button.className = 'tile';
+  button.dataset.id = key;
+  if (framedBy(s)) button.dataset.view = framedBy(s);
+  const value = Object.assign(document.createElement('span'), { className: 'val' });
+  fillValue(value, s);
+  button.append(shortcutIcon(s), value, Object.assign(document.createElement('span'), { textContent: shortcutName(s) }),
+    Object.assign(document.createElement('span'), { className: 'pill' }));
+  // ドラッグだけのもの（押した・動いた・離したを C# へ送る）と、押すもの（開くもの・押すだけのもの。click で押す）で道が違う。
+  if (s.draggable) watchPointer(button, key);
+  else button.addEventListener('click', () => { if (!inLayout()) press(s); });
+  button._s = s;
+  return button;
+}
+
+// 押した回数と時刻。**押す前に聞きに出た答え・押した直後に聞きに出た答えは捨てる** — C# は頼みを周の頭で片付けるので、
+// その前の古い答えで、先に塗った枠が戻ってしまう（1 秒ごとの聞き直しがちょうど押した直後に重なったとき）。
+let asked = 0;
+let askedAt = -Infinity;
+
+/**
+ * 窓の画面の push（wristView）が届いた回数。**聞きに出たあとに push が来たら、その答えは捨てる** —
+ * ✕ や窓のサイドバーは押した回数（asked）を変えないので、閉じる前に読んだ古い答えが、閉じたという push のあとに着くと、
+ * 閉じた窓のタイルに枠が戻る（次の聞き直しまで）。
+ */
+let viewPushes = 0;
+const SETTLE_MS = 150;
+
+/**
+ * ショートカットと帯から。**開いているものをもう一度押すと閉じる**（決めるのは C#。ここは同じ決まりで先に塗るだけ）。
+ * **押した瞬間に枠を塗る**（聞き直した答えで塗ると、押してから色が付くまでが遅い）。
+ * 答え合わせは C# の push（wristView）と、250 ms 後の聞き直し（繋がっていない・頭が追えず開けなかったとき、push は来ない）。
+ */
+function openView(id, key) {
+  asked++;
+  askedAt = performance.now();
+  showViewing(viewing === id ? null : id);
+  if (key) bridge.pressShortcut(key); else bridge.toggleVrWindow(id);
+  setTimeout(pollView, 250);
+}
+
+/**
+ * タイルを押した（click）。開くものは帯と同じ（押した瞬間に枠を塗る）。**処理を走らせるものは C# に頼むだけ**
+ * — 走っている間の様子と結果は、モジュールがタイルの中身とトーストで知らせる。
+ * 開く画面を名乗ったもの（IWristShortcut.MarkedPanel）も、押した瞬間に枠を塗る（開くのはモジュールの処理。答え合わせは開くものと同じ push と聞き直し）。
+ */
+function press(s) {
+  const framed = framedBy(s);
+  if (framed) openView(framed, s.key);
+  else bridge.pressShortcut(s.key);
+}
+
+// ドラッグだけのタイル（モジュールが登録した IDraggableWristShortcut）。
+// **押した瞬間から離すまでが 1 回のドラッグ**（C# の ShortcutGestures が呼ぶ）。ここは押した・動いた・離した・途切れたを送るだけ。
+// 押すたびに番号を増やし、同じ押しの動き・離しにも同じ番号を付ける。C# は今の押しと違う番号を捨てるので、知らせの順が狂っても終わらない引きは残らない。
+// 位置はタイルの左上からの画素と、タイルの大きさ。押したタイルが捕まえる（setPointerCapture）ので、タイルの外へ引いても動き・離しが届く。
+// 手首の板は巻かない（WristHost）ので、レーザーの押す・動かす・離すはそのまま届く。レーザーが板から外れたときは、C# が離しを送ってくる（VrLaser.Leave）。
+
+let pointerSeq = 0;
+
+/**
+ * この読み込みの印。**番号は読み込みごとに 1 から数え直す**ので、C# は印が変わったら数え直す
+ * （SteamVR に入り直すと、手首のページは作り直される）。読み込みの時刻と乱数から作る（同じ印が 2 回出ないことだけが要る）。
+ */
+const pointerPage = `${Math.floor(performance.timeOrigin).toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
+/** いま押しているタイル（{ tile, key, seq, id }）。無ければ null。 */
+let pointing = null;
+
+function watchPointer(tile, key) {
+  tile.classList.add('runs');
+  // Layout Mode の間はタイルの段ごと隠れる（.normal-only）ので、ここで Layout Mode は見ない（C# も見る）。
+  tile.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    cancelPointer();
+    pointing = { tile, key, seq: ++pointerSeq, id: event.pointerId };
+    try { tile.setPointerCapture(event.pointerId); } catch { /* 捕まえられなくても、タイルの上の動きは届く */ }
+    sendPointer('down', event);
+  });
+  tile.addEventListener('pointermove', event => { if (pointedBy(tile, event)) sendPointer('move', event); });
+  tile.addEventListener('pointerup', event => {
+    if (!pointedBy(tile, event)) return;
+    sendPointer('up', event);
+    pointing = null;
+  });
+  tile.addEventListener('pointercancel', event => { if (pointedBy(tile, event)) cancelPointer(); });
+  // 離したのを見ないまま捕まえが外れた。離したあとにも来るが、そのときはもう pointing が空。
+  tile.addEventListener('lostpointercapture', event => { if (pointedBy(tile, event)) cancelPointer(); });
+}
+
+const pointedBy = (tile, event) => pointing?.tile === tile && pointing.id === event.pointerId;
+
+/**
+ * 位置は<b>タイル自身の（縮める前の）画素</b>で送る。押している間はタイルが少し縮む（:active の scale）ので、見た目の箱で測ると
+ * 押した直後と離す前で大きさも位置もずれる。真ん中を軸に縮むので、真ん中からの差を縮めた分だけ戻す。
+ */
+function sendPointer(kind, event) {
+  const { tile, key, seq } = pointing;
+  const width = tile.offsetWidth;
+  const height = tile.offsetHeight;
+  let x = 0;
+  let y = 0;
+  if (event) {
+    const box = tile.getBoundingClientRect();
+    x = (event.clientX - (box.left + box.width / 2)) / (box.width / width || 1) + width / 2;
+    y = (event.clientY - (box.top + box.height / 2)) / (box.height / height || 1) + height / 2;
+  }
+  try { bridge.shortcutPointer(pointerPage, key, seq, kind, x, y, width, height); } catch { /* 繋がっていない */ }
+}
+
+/** 今の押しを途切れたことにする（タイルが外れた・Layout Mode に入った・ページが押しを見失った）。押していなければ何もしない。 */
+function cancelPointer() {
+  if (!pointing) return;
+  sendPointer('cancel', null);
+  pointing = null;
+}
+
+/** 離す直前のこの時間の動きから速さを取る（ms）。 */
+const FLING_WINDOW_MS = 100;
+/**
+ * この時間より短い動きからは速さを取らない（ms）。**同じ瞬間に届いた出来事を割ると速さが果てしなくなる**
+ * （1 周の頭に Move と Up がまとめて来たとき）。ヘッドセットの 1 周（90 Hz で 11 ms）より短く取る。
+ */
+const FLING_MIN_SPAN_MS = 8;
+
+/** 離す直前の指の速さ（px/ms。座標が増える向きが正）。サンプルは { p: 座標, t: 時刻 }。止めてから離した・短すぎて取れないときは 0。 */
+function releaseSpeed(samples, releasedAt) {
+  const recent = samples.filter(s => releasedAt - s.t <= FLING_WINDOW_MS);
+  if (recent.length < 2) return 0;
+
+  const first = recent[0];
+  const last = recent[recent.length - 1];
+  const span = last.t - first.t;
+  if (span < FLING_MIN_SPAN_MS) return 0;
+
+  return (last.p - first.p) / span;
+}
+
+// ショートカットのページを横に引いて送る。**スマホと同じ**: 引いている間は並びが指についてきて、離したときに送るか戻るかを決める。
+// 引けるのは、押すだけのタイル・開くタイルの上、タイルの隙間、板の余白、点の列から。**ドラッグだけのタイルの上の引きはモジュールのもの**で、ページは送らない。
+// 帯（状態の口）からは引かない（帯の項目は押すと画面を開く）。1 ページのときと Layout Mode の間は引かない。
+// 判定はすべてここ（C# はページを知らない。押すだけのタイルの押す・動かす・離すは C# へ送っていない）。
+
+/** 引き始める距離（px）。板の上で 24 mm ほど — トリガーを引いた拍子の振れで、押したつもりがページ送りにならないように。 */
+const PAGE_SLOP_PX = 64;
+/** 離す直前の速さがこれ以上なら、半分に届かなくても払った向きへ送る（px/ms）。 */
+const PAGE_FLICK_SPEED = 0.5;
+/** 端のページから外へ引いたときの手応え。最初は指の PAGE_EDGE_GIVE 倍だけずれ、引くほど重くなって PAGE_EDGE_PX に近づく。 */
+const PAGE_EDGE_GIVE = 0.55;
+const PAGE_EDGE_PX = 120;
+/** 送る・戻るのにかける時間（ms）。1 ページ分で PAGE_SLIDE_MS、残りが短いほど短く（PAGE_SLIDE_MIN_MS まで）。 */
+const PAGE_SLIDE_MS = 260;
+const PAGE_SLIDE_MIN_MS = 120;
+/** 引いたあとの離しに続く click を飲む間（ms）。click は離しと同じ周に来るので、これは念のための幅。 */
+const PAGE_SWALLOW_MS = 300;
+
+/**
+ * いまの押し（{ id, x, y, samples, phase, anchor, base, from }）。押していなければ null。phase は
+ * 'press'（まだ押し。離せば click が届く）・'drag'（引いている）・'off'（このページ送りでは何もしない。離しても押しにはならない）。
+ * from は押したときの並びのずれ（ふつうは 0。滑っている途中で掴んだら、掴んだ所）。
+ */
+let pageSwipe = null;
+/** 指で引いた量（px）。並びのずれは pageOffset(pagePull)。 */
+let pagePull = 0;
+/** 離したあとの滑り（{ from, at, ms, frame }）。滑っていなければ null。 */
+let pageSlide = null;
+/** この時刻（performance.now()）までに来た click を飲む。次に板を押したら外す。 */
+let swallowClickUntil = 0;
+
+/**
+ * 引いた量から、並びをずらす量。前後にページがある向きは指のとおり（隣のページより先へは出ない — その先のタイルは並びに無い）。
+ * **端のページから外へ引いたら、手応えとして抵抗を付ける**（引くほど重くなり、PAGE_EDGE_PX より先へは出ない）。
+ */
+function pageOffset(pull) {
+  if (!pullsOutward(pull)) return Math.max(-PAGE_STRIDE, Math.min(PAGE_STRIDE, pull));
+  const given = Math.abs(pull) * PAGE_EDGE_GIVE;
+  return Math.sign(pull) * PAGE_EDGE_PX * given / (given + PAGE_EDGE_PX);
+}
+
+const pullsOutward = pull => (pull > 0 && page === 0) || (pull < 0 && page === pageCount() - 1);
+
+/**
+ * 指の位置から引いた量。**隣のページより先へ引いた分は覚えない** — 覚えると、指を戻しても先へ行った分を戻るまで並びが動かない。
+ * 端の外へは覚える（抵抗は引いた量から付けるので、戻せばすぐ戻り始める）。
+ */
+function followedPull(swipe, x) {
+  const pull = swipe.base + x - swipe.anchor;
+  if (pullsOutward(pull) || Math.abs(pull) <= PAGE_STRIDE) return pull;
+  const held = Math.sign(pull) * PAGE_STRIDE;
+  swipe.anchor += pull - held;
+  return held;
+}
+
+function showPull(pull) {
+  pagePull = pull;
+  el.tiles.style.transform = `translateX(${-page * PAGE_STRIDE + pageOffset(pull)}px)`;
+}
+
+/**
+ * 離したとき、どのページへ落ち着くか（<code>offset</code> は並びのずれ。左へずれていれば次のページが見えている）。
+ * **速く払ったら払った向き**（ずれが払った向きと逆なら、今のページへ戻る）。ゆっくり離したら、<b>押してから</b>ページの半分を越えて
+ * 隣のページの側へ引いた向き（<code>moved</code>。ふつうは offset と同じ。滑っている途中で掴んだときは、掴んだ所からの分）。
+ * どちらでもなければ今のページ — <b>掴んだだけで離したら、向かっていたページに着く</b>（滑り始めの、まだ半分より手前を掴んでも戻らない）。
+ * 端より先へは行かない。
+ */
+function pageAfterSwipe(offset, moved, speed) {
+  let step = 0;
+  if (Math.abs(speed) >= PAGE_FLICK_SPEED) step = offset * speed >= 0 ? -Math.sign(speed) : 0;
+  else if (Math.abs(moved) > PAGE_STRIDE / 2 && moved * offset > 0) step = -Math.sign(offset);
+  return Math.max(0, Math.min(pageCount() - 1, page + step));
+}
+
+/** そのページに決めて、いまの見た目の位置から滑らせる。**page は先に変える**（滑っている途中で眠っても、着いた先のページのまま）。 */
+function turnTo(target) {
+  if (target === page) {
+    slidePull(pagePull);
+    return;
+  }
+  const pull = pageOffset(pagePull) + (target - page) * PAGE_STRIDE;
+  page = target;
+  renderShortcuts();
+  slidePull(pull);
+}
+
+/** 引いた量 <code>pull</code> の所から、ずれの無い所まで滑らせる（だんだん緩める）。 */
+function slidePull(pull) {
+  stopSlide();
+  showPull(pull);
+  const distance = Math.abs(pageOffset(pull));
+  if (distance < 0.5) {
+    showPull(0);
+    return;
+  }
+
+  const slide = { from: pull, at: performance.now(), ms: Math.max(PAGE_SLIDE_MIN_MS, PAGE_SLIDE_MS * Math.min(1, distance / PAGE_STRIDE)), frame: 0 };
+  pageSlide = slide;
+  const step = now => {
+    if (pageSlide !== slide) return;
+    const t = Math.min(1, Math.max(0, (now - slide.at) / slide.ms));
+    showPull(slide.from * (1 - t) ** 3);
+    if (t >= 1) {
+      pageSlide = null;
+      return;
+    }
+    slide.frame = requestAnimationFrame(step);
+  };
+  slide.frame = requestAnimationFrame(step);
+}
+
+/** 滑りをその場で止める（引いた量はそのまま）。 */
+function stopSlide() {
+  if (!pageSlide) return;
+  cancelAnimationFrame(pageSlide.frame);
+  pageSlide = null;
+}
+
+function followSwipe(anchor, base) {
+  pageSwipe.phase = 'drag';
+  pageSwipe.anchor = anchor;
+  pageSwipe.base = base;
+  el.board.classList.add('swiping');
+}
+
+/** 引きの途中・滑りの途中を捨てる（並べ直した・Layout Mode に入った）。引いていた押しは、離しても押しにはしない。まだ押しなら押しのまま。 */
+function dropPageSwipe() {
+  stopSlide();
+  if (pageSwipe?.phase === 'press') pageSwipe = null;
+  else if (pageSwipe) pageSwipe.phase = 'off';
+  el.board.classList.remove('swiping');
+  showPull(0);
+}
+
+// 新しい押しが来たのに前の押しが残っている — 前の離しが届かなかった（窓の外で離した）。前の押しは終わったことにして、並びを着かせる
+// （板の上の押しなら、すぐ下の板の pointerdown が滑りごと掴む）。帯や通知の上の押しで、残った引きが動き出さないように。
+window.addEventListener('pointerdown', () => {
+  if (!pageSwipe) return;
+  pageSwipe = null;
+  el.board.classList.remove('swiping');
+  if (pagePull !== 0 && !pageSlide) slidePull(pagePull);
+}, true);
+
+// 捕まえる側で拾う — タイル（ドラッグだけのものの watchPointer）より先に、滑りを止めておく。
+el.board.addEventListener('pointerdown', event => {
+  swallowClickUntil = 0;
+  if (event.button !== 0 || inLayout() || pageCount() <= 1 || event.target.closest('.strip')) return;
+
+  const caught = !!pageSlide || pagePull !== 0;
+  stopSlide();
+  pageSwipe = {
+    id: event.pointerId, x: event.clientX, y: event.clientY, samples: [{ p: event.clientX, t: event.timeStamp }],
+    phase: 'press', anchor: 0, base: 0, from: pageOffset(pagePull),
+  };
+
+  // ドラッグだけのタイル: 引きはモジュールのもの。滑っている途中なら、ドラッグの下でタイルが動かないよう止めたままにし、離したら着かせる。
+  if (event.target.closest('.tile')?._s?.draggable) pageSwipe.phase = 'off';
+  // 止まっていない並びを押したら、その場で掴む（すぐ指についてくる。押しにはしない — スマホで流れているものに触ると止まるのと同じ）。
+  else if (caught) followSwipe(event.clientX, pagePull);
+}, true);
+
+// 窓で拾う（指が板の外へ出ても、離すまでは引き続ける。レーザーが板から外れたら、ホストが離しを送る — VrLaser.Leave）。
+window.addEventListener('pointermove', event => {
+  const swipe = pageSwipe;
+  if (!swipe || swipe.id !== event.pointerId || swipe.phase === 'off') return;
+  swipe.samples.push({ p: event.clientX, t: event.timeStamp });
+  if (swipe.samples.length > 16) swipe.samples.shift();   // 90 Hz で 100 ms 分より少し多く
+
+  if (swipe.phase === 'press') {
+    const dx = event.clientX - swipe.x;
+    const dy = event.clientY - swipe.y;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < PAGE_SLOP_PX) return;
+    // 縦の方が大きく動いた。この押しではページを送らない（押しのまま — タイルの上で離せば押せる）。
+    if (Math.abs(dx) <= Math.abs(dy)) {
+      pageSwipe = null;
+      return;
+    }
+    // **越えた所から指についてくる**（越えるまでに動いた分は足さない。足すと、引き始めた瞬間に並びが跳ぶ）。
+    followSwipe(event.clientX, 0);
+  }
+  showPull(followedPull(swipe, event.clientX));
+});
+
+window.addEventListener('pointerup', event => {
+  const swipe = pageSwipe;
+  if (!swipe || swipe.id !== event.pointerId) return;
+  pageSwipe = null;
+  el.board.classList.remove('swiping');
+  if (swipe.phase === 'press') return;
+
+  // 並びが指についてくるので、押したタイルの上で離すことがある（ブラウザはそこで click を出す）。引いたあとの click は押しにしない。
+  swallowClickUntil = performance.now() + PAGE_SWALLOW_MS;
+  if (swipe.phase === 'off') {
+    if (pagePull !== 0) slidePull(pagePull);
+    return;
+  }
+
+  showPull(followedPull(swipe, event.clientX));
+  swipe.samples.push({ p: event.clientX, t: event.timeStamp });
+  const offset = pageOffset(pagePull);
+  turnTo(pageAfterSwipe(offset, offset - swipe.from, releaseSpeed(swipe.samples, event.timeStamp)));
+});
+
+window.addEventListener('pointercancel', event => {
+  const swipe = pageSwipe;
+  if (!swipe || swipe.id !== event.pointerId) return;
+  pageSwipe = null;
+  el.board.classList.remove('swiping');
+  if (pagePull !== 0) slidePull(pagePull);
+});
+
+// 飲むのは指（レーザー）の離しで出る click だけ。位置の無い click（キーボード・click()。detail が 0）は引きとは関係ないので通す。
+el.board.addEventListener('click', event => {
+  if (event.detail === 0 || performance.now() > swallowClickUntil) return;
+  swallowClickUntil = 0;
+  event.stopImmediatePropagation();
+  event.preventDefault();
+}, true);
+
+/**
+ * 点を押した。**当たりは隣の点と重なる**（CSS の <code>.dots button::before</code>）ので、押した所にいちばん近い点のページへ。
+ * 位置の無い click（キーボード・<code>click()</code>）は押した点のまま。隣のページなら、引いて送ったときと同じく滑らせる。
+ */
+el.dots.addEventListener('click', event => {
+  if (inLayout() || event.target === el.dots) return;
+  const dots = [...el.dots.children];
+  const away = dot => {
+    const box = dot.getBoundingClientRect();
+    return Math.max(box.left - event.clientX, event.clientX - box.right, 0);
+  };
+  const chosen = event.detail === 0
+    ? dots.indexOf(event.target.closest('button'))
+    : dots.reduce((best, dot, i) => (away(dot) < away(dots[best]) ? i : best), 0);
+  if (chosen < 0 || chosen === page) return;
+  if (Math.abs(chosen - page) === 1) turnTo(chosen);
+  else {
+    page = chosen;
+    renderShortcuts();
+  }
+});
+
+// 手首を見ていない間（browser が眠った）は rAF が止まる。滑りの途中なら着いたことにする。
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden || !pageSlide) return;
+  stopSlide();
+  showPull(0);
+});
+
+/**
+ * push で届いた中身（名前ごとに最後のもの）。**台帳を引き終わる前に届いた分を捨てない** —
+ * 起動の getShortcuts を待つ間に届いた push は、まだ台帳に無い名前なので当てる先が無い。
+ */
+const pushedValues = new Map();
+
+/** 台帳を差し替える（起動のとき）。待つ間に届いた中身を、引いた台帳の上に当て直す。 */
+function setCatalogue(list) {
+  catalogue = list ?? [];
+  applyShortcutStatus([...pushedValues.values()]);
+}
+
+/** 中身が変わった（push）。並びは変えず、出ているタイルの中身の行だけ書き換える。 */
+function applyShortcutStatus(items) {
+  for (const item of items ?? []) {
+    pushedValues.set(item.key, item);
+    const s = known(item.key);
+    if (!s) continue;
+    s.text = item.text;
+    s.state = item.state;
+    // ページを持つタイルには中身の行が無い（中はページが描く）。同じ名前が 2 つ並んでいれば両方。
+    for (const tile of el.tiles.querySelectorAll('.tile')) {
+      const value = tile.dataset.id === item.key ? tile.querySelector('.val') : null;
+      if (value) fillValue(value, s);
+    }
+  }
+}
+
+/** 枠だけ塗り直す。**タイルは作り直さない**（作り直すと、乗せている指の :hover が次に動かすまで外れる）。 */
+function showViewing(now) {
+  if (now === viewing) return;
+  viewing = now;
+  for (const tile of el.tiles.querySelectorAll('.tile')) {
+    const on = !!tile.dataset.view && tile.dataset.view === viewing;
+    tile.classList.toggle('on', on);
+    tile.setAttribute('aria-pressed', String(on));
+  }
+}
+
+/** 空間の窓がいま何を出しているか。push を取りこぼしても追いつけるよう、時々聞き直す。 */
+async function pollView() {
+  if (performance.now() - askedAt < SETTLE_MS) return;
+  const mine = asked;
+  const pushes = viewPushes;
+  let now = null;
+  try { now = await bridge.getVrWindowView(); } catch { return; }
+  if (mine !== asked || pushes !== viewPushes) return;
+  showViewing(now ?? null);
+}
+
+// モジュールが名乗ったショートカットにページ（IWristShortcut.Page）があれば、タイルの中にその iframe を立てる。
+// **ページは描くだけ**: 押す・ドラッグはタイルが受ける（押すだけのものは click、ドラッグだけのものは watchPointer）。ページが押したことにする口は無い。
+//
+// **中継は手首がする**（シェルのパネルと同じ作法: 持ち主は発信元の iframe と origin で決め、ページには名乗らせない）。
+// 通すのは自分のモジュールの call と push・文言だけ。シェルの callHostService の allowlist（クリップボード・右クリックのメニュー）は渡さない。
+
+const originOf = module => 'spoitable://' + module;
+
+function buildPageTile(key, s) {
+  const tile = document.createElement('div');
+  tile.className = 'tile page';
+  tile.dataset.id = key;
+  if (framedBy(s)) tile.dataset.view = framedBy(s);
+
+  const frame = document.createElement('iframe');
+  frame.title = shortcutName(s);
+  // ready は**いまの読み込み**の印。並べ替えで動かしたとき（読み込み直しになる）も renderShortcuts が下ろす。
+  frame._tile = { key, s, module: s.source, origin: originOf(s.source), ready: false, missedConfig: false };
+  frame.src = s.page;
+
+  tile.append(frame, Object.assign(document.createElement('span'), { className: 'pill' }));
+  tile._s = s;
+  // ページを持つのはモジュールが登録したものだけ（IWristShortcut.Page）。押す・ドラッグはタイルが受ける（道はほかのタイルと同じ）。
+  if (s.draggable) watchPointer(tile, key);
+  else {
+    tile.classList.add('runs');
+    tile.addEventListener('click', () => { if (!inLayout()) press(s); });
+  }
+  return tile;
+}
+
+const tileFrames = () => [...el.tiles.querySelectorAll('.tile.page > iframe')];
+
+/** 発信元の iframe からタイルを決める。**origin まで見る** — contentWindow は中で別のページへ移っても同じものが残る。 */
+function tileOf(source, origin) {
+  for (const frame of tileFrames()) {
+    if (frame.contentWindow !== source) continue;
+    return origin === frame._tile.origin ? frame._tile : null;
+  }
+  return null;
+}
+
+/**
+ * タイルのページへ push を配る。<code>module</code> が null なら全部（設定が変わった）、ほかはそのモジュールのページだけ。
+ * **読み込み中のページには送らない**（中身はまだ about:blank で、黙って消える）。設定の変更だけは覚えておいて、ready で渡す。
+ */
+function pushToTiles(module, channel, payload) {
+  for (const frame of tileFrames()) {
+    const tile = frame._tile;
+    if (module !== null && tile.module !== module) continue;
+    if (!tile.ready) {
+      if (channel === 'configChanged') tile.missedConfig = true;
+      continue;
+    }
+    frame.contentWindow?.postMessage({ stk: 1, kind: 'push', channel, payload }, tile.origin);
+  }
+}
+
+async function tileHostService(method) {
+  if (method === 'strings') return { ok: true, result: await bridge.getStrings() };
+
+  // 手首には右クリックのメニューが無い。閉じたのと同じ返事をする（返さないと、ページはメニューが開いたままだと思う）。
+  if (method === 'contextMenu') return { ok: true, result: null };
+
+  return { ok: false, error: t('host.error.notAllowed', method) };
+}
+
+window.addEventListener('message', async event => {
+  const message = event.data;
+  if (!message || message.stk !== 1) return;
+
+  const tile = tileOf(event.source, event.origin);
+  if (!tile) return;
+
+  if (message.kind === 'ready') {
+    // push はここから先だけ届く。読み込み中に設定（テーマ）が変わっていたら、取りこぼした知らせをここで渡す。
+    tile.ready = true;
+    (window.__stkTileReady ??= {})[tile.key] = true;
+    if (tile.missedConfig) {
+      tile.missedConfig = false;
+      event.source.postMessage({ stk: 1, kind: 'push', channel: 'configChanged', payload: {} }, tile.origin);
+    }
+    return;
+  }
+
+  // bridge.js がパネルのために送る知らせ（押した = 右クリックのメニューを閉じる・Esc）。手首にはメニューが無いので、閉じるものも無い。
+  // ページには押す・引くが届かない（iframe は pointer-events: none）ので、押した印が来ても何もしない。
+  if (message.kind === 'pointerdown' || message.kind === 'escape') return;
+
+  const reply = body => event.source.postMessage({ stk: 1, id: message.id, ...body }, tile.origin);
+
+  try {
+    if (message.kind === 'module') {
+      const response = await bridge.callModule(tile.module, message.method, JSON.stringify(message.payload ?? {}));
+      reply(response.ok ? { ok: true, result: JSON.parse(response.result) } : { ok: false, error: response.error });
+    } else if (message.kind === 'host') {
+      reply(await tileHostService(message.method));
+    } else {
+      reply({ ok: false, error: t('host.error.unknownKind', message.kind) });
+    }
+  } catch (err) {
+    reply({ ok: false, error: String((err && err.message) || err) });
+  }
+});
+
+// VRChat の出来事・アプリとモジュールの通知・アプリの警告を、**新しいものが上**で並べる。
+
+const EVENT_LOOK = {
+  PlayerJoined: ['i-join', 'green'],
+  PlayerLeft: ['i-left', 'gray'],
+  WorldJoined: ['i-world', 'blue'],
+  VideoPlaybackStarted: ['i-play', 'purple'],
+  VideoPlaybackFailed: ['i-fail', 'red'],
+  VideoResolved: ['i-link', 'teal'],
+};
+
+let notes = [];
+let hiddenNotes = new Set();
+const seenEvents = new Set();
+
+// 覚えておく数。**出すものと出さないもので別々に数える** — まとめて切ると、数の多い出さないもの（再生・警告）が
+// 出すものを押し出して、板が空になる。出さないものも少し残すのは、切り替えたときに並ぶように。
+const NOTES_KEPT = 40;
+
+function addNote(note) {
+  if (notes.some(n => n.key === note.key)) {
+    notes = notes.map(n => (n.key === note.key ? { ...note, arrived: n.arrived } : n));
+  } else {
+    notes.push(note);
+  }
+  // 同じ秒のものは、出どころの通し番号が大きい方（後に起きた方）を上に。VRChat のログは秒までしか無い。
+  notes.sort((a, b) => b.at - a.at || b.seq - a.seq);
+  let shown = 0, hidden = 0;
+  notes = notes.filter(n => (hiddenNotes.has(n.filter) ? hidden++ : shown++) < NOTES_KEPT);
+}
+
+function fromEvent(e, live) {
+  if (!EVENT_LOOK[e.kind] || seenEvents.has(e.id)) return null;
+  seenEvents.add(e.id);
+  const [svg, tone] = EVENT_LOOK[e.kind];
+  const who = e.title ?? '';
+  return {
+    key: 'e' + e.id, seq: Number(e.id) || 0, filter: e.kind, svg, tone,
+    title: t('host.wrist.note.' + e.kind, who),
+    meta: e.kind === 'PlayerJoined' || e.kind === 'PlayerLeft' ? (worldName() ?? '') : (e.kind === 'WorldJoined' ? (e.detail ?? '') : who),
+    at: Date.parse(e.ts) || Date.now(),
+    arrived: live ? Date.now() : 0,
+  };
+}
+
+function fromHistory(h, live) {
+  return {
+    key: 'h' + h.seq, seq: h.seq ?? 0, filter: h.kind?.id ?? 'info', path: h.kind?.icon, tone: h.kind?.tone ?? 'gray',
+    title: h.title, meta: h.body ?? '',
+    at: Date.parse(h.at) || Date.now(),
+    arrived: live ? Date.now() : 0,
+  };
+}
+
+function fromAppLog(a, live) {
+  if (!['WRN', 'ERR', 'CRT'].includes(a.shortLevel)) return null;
+  return {
+    key: 'a' + a.seq, seq: a.seq ?? 0, filter: a.shortLevel, svg: 'i-warn', tone: a.shortLevel === 'WRN' ? 'amber' : 'red',
+    title: a.message, meta: a.category ?? '',
+    at: Date.parse(a.ts) || Date.now(),
+    arrived: live ? Date.now() : 0,
+  };
+}
+
+function worldName() {
+  return statusItems.find(i => i.id === 'host.world')?.text || null;
+}
+
+function age(at) {
+  const minutes = Math.floor((Date.now() - at) / 60000);
+  if (minutes < 1) return t('host.wrist.age.now');
+  if (minutes < 60) return t('host.wrist.age.min', minutes);
+  return t('host.wrist.age.hour', Math.floor(minutes / 60));
+}
+
+function renderNotes() {
+  const kept = notes.filter(n => !hiddenNotes.has(n.filter));
+  const list = el.noteList;
+
+  // **辿っている途中なら、見ている行を動かさない。** 新しい通知は上に挿さるので、そのままだと中身が 1 行ずつ下へずれる。
+  // 一番上を見ているとき（巻いていない）は、新しいものがそのまま上に出る。
+  const before = list.scrollTop;
+  const anchor = before > 0 ? [...list.children].find(row => row.offsetTop + row.offsetHeight > before) : null;
+  const anchorKey = anchor?.dataset.key;
+  const anchorShift = anchor ? anchor.offsetTop - before : 0;
+
+  list.replaceChildren(...kept.map((n, i) => {
+    const row = document.createElement('div');
+    row.dataset.key = n.key;
+    const fresh = n.arrived && Date.now() - n.arrived < FRESH_MS;
+    row.className = 'note' + (fresh ? ' fresh' : i > 0 ? ' old' : '');
+    // 描き直しても線が頭から戻らないよう、**残りの時間だけ**縮める。
+    const bar = Object.assign(document.createElement('span'), { className: 'bar' });
+    if (fresh) bar.style.animationDuration = Math.max(0, FRESH_MS - (Date.now() - n.arrived)) + 'ms';
+
+    const sq = document.createElement('span');
+    sq.className = 'sq';
+    sq.dataset.tone = n.tone;
+    sq.appendChild(n.path ? pathIcon(n.path) : icon(n.svg ?? 'i-bell'));
+
+    const text = document.createElement('div');
+    text.className = 'text';
+    text.append(cell('title', n.title), cell('meta', n.meta));
+
+    row.append(sq, text, cell('age', age(n.at)), bar);
+    return row;
+  }));
+
+  list.hidden = kept.length === 0;
+  el.noteEmpty.hidden = kept.length > 0 || !el.ask.hidden;
+
+  const again = anchorKey ? [...list.children].find(row => row.dataset.key === anchorKey) : null;
+  if (again) {
+    list.scrollTop = again.offsetTop - anchorShift;
+    // 引いている最中なら、引き始めの位置も同じだけずらす（ずらさないと、次の動きで挿さった分だけ跳ぶ）。
+    if (noteDrag) noteDrag.top += list.scrollTop - before;
+  }
+  markNoteEdges();
+}
+
+// 通知の板は上下に辿れる。
+// 自前のレーザーは手首の板では巻かない（WristHost の Scrolls: false — タイルを押した瞬間に Down を送り、押した瞬間に枠を塗るため）。
+// なので、通知の上で引いたまま動かしたら、**このページが自分で巻く**。押す物が無い所なので、押し心地は変わらない。
+
+/** これより動くまでは巻かない（引いた拍子の振れ。レーザーの振れの内 1.2 cm と同じ考え）。 */
+const NOTE_DRAG_SLOP = 6;
+let noteDrag = null;
+
+// 離したあとも流れる（慣性）。
+// 離す直前の速さで流し始めて、だんだん緩める。次に押したら止まる・端で止まる・眠ったら止まる。
+
+// 速さは離す直前の動きから取る（releaseSpeed。取り方はページの払いと同じ）。
+/** これより遅ければ流さない・ここまで落ちたら止める（px/ms）。 */
+const FLING_MIN_SPEED = 0.05;
+/** 速さの上限（px/ms）。通知の板は高さ 200 px ほどしかないので、これ以上は追えない。 */
+const FLING_MAX_SPEED = 3;
+/** 緩め方。速さが 1/e になるまでの時間（ms）。流れる距離は「離した速さ × これ」。 */
+const FLING_DECAY_MS = 325;
+
+let noteFling = null;
+
+function markNoteEdges() {
+  const list = el.noteList;
+  list.classList.toggle('above', list.scrollTop > 0);
+  list.classList.toggle('below', list.scrollTop + list.clientHeight < list.scrollHeight - 1);
+}
+
+/** 離す直前の速さ（巻く向き、px/ms）。止めてから離した・短すぎて取れないときは 0。 */
+function flingSpeed(drag, releasedAt) {
+  // 指を上へ動かすと（y が減る）下へ巻く。
+  const speed = -releaseSpeed(drag.samples, releasedAt);
+  return Math.max(-FLING_MAX_SPEED, Math.min(FLING_MAX_SPEED, speed));
+}
+
+function startFling(speed) {
+  stopFling();
+  if (Math.abs(speed) < FLING_MIN_SPEED) return;
+
+  const fling = { speed, at: performance.now(), carry: 0, frame: 0 };
+  noteFling = fling;
+
+  const step = now => {
+    if (noteFling !== fling) return;
+
+    // 間が空いた周（描くのが詰まった）で一気に跳ばない。
+    const dt = Math.min(now - fling.at, 50);
+    fling.at = now;
+
+    const list = el.noteList;
+    const bottom = list.scrollHeight - list.clientHeight;
+
+    // 端数を溜めて、まとまったら巻く（scrollTop に端数を足しても丸められて動かないことがある）。
+    fling.carry += fling.speed * dt;
+    const whole = Math.trunc(fling.carry);
+    if (whole !== 0) {
+      list.scrollTop += whole;
+      fling.carry -= whole;
+    }
+
+    fling.speed *= Math.exp(-dt / FLING_DECAY_MS);
+
+    const atEdge = fling.speed > 0 ? list.scrollTop >= bottom - 0.5 : list.scrollTop <= 0;
+    if (atEdge || Math.abs(fling.speed) < FLING_MIN_SPEED) {
+      noteFling = null;
+      return;
+    }
+
+    fling.frame = requestAnimationFrame(step);
+  };
+
+  fling.frame = requestAnimationFrame(step);
+}
+
+function stopFling() {
+  if (!noteFling) return;
+  cancelAnimationFrame(noteFling.frame);
+  noteFling = null;
+}
+
+// 次に押したら止める（通知の上でも、タイルでも）。捕まえる側で拾うので、先に止まってから押した物へ届く。
+window.addEventListener('mousedown', stopFling, true);
+
+el.noteList.addEventListener('mousedown', event => {
+  if (event.button !== 0 || inLayout()) return;
+  noteDrag = { y: event.clientY, top: el.noteList.scrollTop, moving: false, samples: [{ p: event.clientY, t: event.timeStamp }] };
+});
+
+// 窓で拾う（指が通知の外へ出ても、離すまでは巻き続ける。レーザーが板から外れたら、ホストが Up を送る）。
+window.addEventListener('mousemove', event => {
+  if (!noteDrag) return;
+  const dy = event.clientY - noteDrag.y;
+  if (!noteDrag.moving && Math.abs(dy) < NOTE_DRAG_SLOP) return;
+  noteDrag.moving = true;
+  el.noteList.scrollTop = noteDrag.top - dy;
+
+  noteDrag.samples.push({ p: event.clientY, t: event.timeStamp });
+  if (noteDrag.samples.length > 16) noteDrag.samples.shift();   // 90 Hz で 100 ms 分より少し多く
+});
+
+window.addEventListener('mouseup', event => {
+  const drag = noteDrag;
+  noteDrag = null;
+  if (drag?.moving) startFling(flingSpeed(drag, event.timeStamp));
+});
+el.noteList.addEventListener('scroll', markNoteEdges, { passive: true });
+
+// 手首を見ていない間（browser が眠った）に、一番上へ戻す。次に見たときは新しいものから。
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) return;
+  noteDrag = null;
+  stopFling();
+  el.noteList.scrollTop = 0;
+  markNoteEdges();
+});
+
+// 答えを待つ通知は 1 つずつ。**どこで答えても 1 回だけ効く**（ホスト側の約束）。時間切れは C# が決めるので、ここは線を縮めるだけ。
+
+const asks = [];
+let asking = null;
+
+function pushAsk(payload) {
+  if (asks.some(a => a.id === payload.id) || asking?.id === payload.id) return;
+  asks.push(payload);
+  if (!asking) showNextAsk();
+}
+
+function showNextAsk() {
+  asking = asks.shift() ?? null;
+  el.ask.hidden = !asking;
+  el.notes.classList.toggle('asking', !!asking);
+  renderNotes();
+  if (!asking) return;
+
+  el.askSq.dataset.tone = asking.kind?.tone ?? 'accent';
+  el.askSq.replaceChildren(asking.kind?.icon ? pathIcon(asking.kind.icon) : icon('i-bell'));
+  el.askTitle.textContent = asking.title;
+  el.askBody.textContent = asking.body ?? '';
+  el.askYes.textContent = asking.confirmLabel;
+
+  // 残り時間の線。**残りから縮める**（後から開いた面は、もう過ぎた分を待たない）。
+  const total = asking.totalMs || asking.timeoutMs || 0;
+  const left = asking.timeoutMs ?? total;
+  el.askLife.style.transition = 'none';
+  el.askLife.style.transform = `scaleX(${total > 0 ? Math.min(1, left / total) : 0})`;
+  if (total > 0) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      el.askLife.style.transition = `transform ${left}ms linear`;
+      el.askLife.style.transform = 'scaleX(0)';
+    }));
+  }
+}
+
+function answer(accepted) {
+  const current = asking;
+  if (current) bridge.answerNotification(current.id, accepted);
+  showNextAsk();
+}
+
+// **押しても自分では切り替えない。** C# が受けた（または断った）結果を wristLayout で送ってくるので、それを写す。
+
+const inLayout = () => document.body.classList.contains('layout');
+
+function renderLayout(layout) {
+  // Layout Mode の間はタイルを押さない（並べ替えるもの）。押している最中に入ったら、その押しは途切れたことにする。
+  // ページを引いている・滑っている途中なら、それも捨てる（Layout Mode の間は引かない）。
+  if (layout.on) {
+    cancelPointer();
+    dropPageSwipe();
+  }
+  document.body.classList.toggle('layout', !!layout.on);
+  el.width.textContent = `${layout.width.toFixed(2)} m`;
+}
+
+// テーマの版は、数えるだけでなく**読み込みごとの印も付ける**。読み込み直すと 1 から数え直して、
+// 前に取った `?v=11`（前の配色のまま CEF に残っている）とぶつかり、切り替えても何も変わらない。
+let themeVersion = 0;
+const themeLoad = Date.now().toString(36);
+
+window.stk = {
+  receive(channel, payload) {
+    if (channel === 'wristLayout') {
+      renderLayout(payload);
+    } else if (channel === 'wristView') {
+      // 窓の画面が変わった（開いた・切り替えた・✕ で閉じた・窓のサイドバー）。C# が決めた答えなので、そのまま写す。
+      viewPushes++;
+      showViewing(payload?.view ?? null);
+    } else if (channel === 'wristStatus') {
+      renderStatus(payload);
+    } else if (channel === 'notify') {
+      pushAsk(payload);
+    } else if (channel === 'notifyClosed') {
+      // 別の面で答えられた・時間切れ。黙って引っ込める。
+      const index = asks.findIndex(a => a.id === payload.id);
+      if (index >= 0) asks.splice(index, 1);
+      if (asking && asking.id === payload.id) showNextAsk();
+    } else if (channel === 'notifyHistory') {
+      addNote(fromHistory(payload, true));
+      renderNotes();
+    } else if (channel === 'logEvents') {
+      for (const e of payload ?? []) { const note = fromEvent(e, true); if (note) addNote(note); }
+      renderNotes();
+    } else if (channel === 'appLogs') {
+      for (const a of payload ?? []) { const note = fromAppLog(a, true); if (note) addNote(note); }
+      renderNotes();
+    } else if (channel === 'shortcutStatus') {
+      applyShortcutStatus(payload);
+    } else if (channel === 'modulePush') {
+      // モジュールの push。**そのモジュールのタイルのページにだけ**渡す（宛先はホストが決めた module）。
+      pushToTiles(String(payload?.module ?? ''), payload?.channel, payload?.payload);
+    } else if (channel === 'configChanged') {
+      // テーマとショートカットが変わったかもしれない。**取り直す**（どれが変わったかは見ない）。タイルのページにも伝える（テーマを引き直す）。
+      const theme = document.querySelector('link[href^="/_host/theme.css"]');
+      if (theme) theme.href = '/_host/theme.css?v=' + themeLoad + '-' + (++themeVersion);
+      pushToTiles(null, 'configChanged', {});
+      refresh(payload && payload.language);
+    }
+  },
+};
+
+async function refresh(languageChanged) {
+  if (languageChanged) await loadStrings();
+
+  const status = await bridge.getStatus();
+  hiddenNotes = new Set(status.wristHiddenNotes ?? []);
+  // 言語が変わったらタイルを作り直す。名前は作るときに書き、タイルのページは文言を読み込みのときに 1 回だけもらうので、読み込み直す。
+  renderShortcuts(status.wristShortcuts, !!languageChanged);
+  renderStatus(status.wristStatus);
+  renderNotes();
+}
+
+async function boot() {
+  await CefSharp.BindObjectAsync('stkHost');
+  await loadStrings();
+
+  modules = await bridge.getModules();
+  setCatalogue(await bridge.getShortcuts());
+
+  const status = await bridge.getStatus();
+  hiddenNotes = new Set(status.wristHiddenNotes ?? []);
+  renderShortcuts(status.wristShortcuts);
+  renderStatus(status.wristStatus);
+
+  // 画面より先に起きたこと（通知・アプリの警告）は getStatus から、VRChat の出来事は記録から追いつく。
+  for (const h of status.history ?? []) addNote(fromHistory(h, false));
+  for (const a of status.appLogs ?? []) { const note = fromAppLog(a, false); if (note) addNote(note); }
+  try {
+    const recent = await bridge.queryLog(JSON.stringify({
+      limit: 12, beforeId: null, linesBefore: null,
+      excludeKinds: ['ApiRequest', 'raw'], from: null, to: null, includeLines: false,
+    }));
+    for (const e of recent?.events ?? recent?.rows ?? []) { const note = fromEvent(e, false); if (note) addNote(note); }
+  } catch { /* 記録が読めなくても、届く分は並ぶ */ }
+  renderNotes();
+
+  for (const ask of status.asks ?? []) pushAsk(ask);
+
+  el.unlock.addEventListener('click', () => bridge.setWristLayout(true));
+  el.done.addEventListener('click', () => bridge.setWristLayout(false));
+  el.smaller.addEventListener('click', () => bridge.resizeWrist(-1));
+  el.larger.addEventListener('click', () => bridge.resizeWrist(1));
+  el.reset.addEventListener('click', () => bridge.resetWristPosition());
+  el.askYes.addEventListener('click', () => answer(true));
+  el.askNo.addEventListener('click', () => answer(false));
+
+  // 経過時間と「新しい」の線を進める。窓の様子も時々聞き直す。
+  setInterval(renderNotes, 30000);
+  setInterval(pollView, 1000);
+  await pollView();
+
+  window.__stkReady = true;
+}
+
+boot().catch(err => {
+  window.__stkError = String((err && err.stack) || err);
+  el.items.textContent = 'bridge error: ' + err;
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,116 @@
+/* パネルの骨格。**色はここで決めない** — 値は全部トークン（`/_host/theme.css`）から引く。
+ *
+ * **テーマより先に読む。** CSS は後から来た方が勝つので、この順でないと
+ * テーマが骨格を上書きできない。
+ */
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 1.1em 1.6em; background: var(--bg); color: var(--fg);
+  font: var(--font-weight) var(--font-size)/1.5 var(--font-ui);
+}
+h1 { margin: 0; font-size: 1.5em; font-weight: 650; letter-spacing: -.015em; }
+h2 { margin: 0 0 .5em; font-size: .95em; font-weight: 600; }
+section { margin-top: 1.6em; }
+.hidden { display: none !important; }
+.spacer { flex: 1; }
+.ico { width: 1.2em; height: 1.2em; flex: none; }
+
+.head { display: flex; align-items: center; gap: .9em; }
+.device { margin-top: .3em; color: var(--muted); font-size: .85em; }
+
+/* 繋がっているかは色でも出す。数字だけだと、止まっているのか 0 なのか分からない。 */
+.state { display: flex; align-items: center; gap: .5em; font-size: .85em; }
+.dot { width: .5em; height: .5em; border-radius: 50%; background: var(--faint); }
+.state.on .dot { background: var(--good); }
+.state.on { color: var(--fg); }
+.state.quiet { color: var(--fg); }
+.state.off { color: var(--muted); }
+
+.empty { color: var(--muted); font-size: .85em; }
+.label { color: var(--faint); font-size: .78em; }
+
+.card { border: 1px solid var(--border); border-radius: .55em; background: var(--surface); }
+
+/* 数字のタイル。大きい現在値 + 最小/平均/最大 */
+.tiles { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: .7em; margin-top: 1em; }
+.tile {
+  display: flex; flex-direction: column; gap: .2em; padding: .8em 1em;
+  border: 1px solid var(--border); border-radius: .55em; background: var(--surface);
+}
+.tile b { font-size: 1.6em; font-weight: 650; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile.big { flex-direction: row; align-items: center; gap: .8em; }
+.tile .heart { width: 2em; height: 2em; color: var(--tone-rose); }
+.num { display: flex; align-items: baseline; gap: .4em; }
+.bpm { font-size: 3.2em; font-weight: 650; line-height: 1; font-variant-numeric: tabular-nums; }
+.bpm.off { color: var(--faint); }
+.unit { color: var(--muted); font-size: .85em; }
+
+.chart { margin-top: .7em; }
+.chart svg { display: block; width: 100%; height: 11em; }
+.chart path {
+  fill: none; stroke: var(--tone-rose); stroke-width: 3; stroke-linejoin: round;
+  stroke-linecap: round; vector-effect: non-scaling-stroke;
+}
+.stats { padding: .4em .9em .6em; color: var(--faint); font-size: .78em; }
+
+.devices { display: flex; flex-direction: column; gap: .4em; }
+.found {
+  display: flex; align-items: center; gap: .7em; padding: .5em .8em;
+  border: 1px solid var(--border); border-radius: .45em; background: var(--surface); font-size: .88em;
+}
+.found.here { border-color: var(--accent); }
+.found .tag { flex: none; font-size: .8em; color: var(--accent); }
+
+.controls { display: flex; align-items: center; gap: .6em; margin: .6em 0 0; flex-wrap: wrap; }
+
+/* 選ぶ欄（`_host/pick.js`・`when.js` が被せる `<button class="spoitable-pick-value">` など）の見た目は `/_host/ui.css` と部品の JS が持つ。 */
+button {
+  height: 2.15em; padding: 0 .75em; font: inherit; font-size: .88em; color: var(--fg);
+  border: 1px solid var(--border); border-radius: .45em; background: var(--surface); cursor: pointer;
+}
+button:hover { background: var(--hover); border-color: var(--faint); }
+button:disabled { opacity: .5; cursor: default; background: var(--surface); border-color: var(--border); }
+.head button { background: var(--accent); color: var(--on-accent); font-weight: 600; border: 0; }
+.head button:hover { background: var(--accent); filter: brightness(1.08); }
+
+select {
+  height: 2.15em; font: inherit; font-size: .88em; padding: 0 .6em; color: inherit;
+  border: 1px solid var(--border); border-radius: .45em; background: var(--surface);
+}
+
+.notice {
+  display: flex; gap: .7em; margin-top: 1em; padding: .8em 1em; font-size: .88em;
+  border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--border)); border-radius: .55em;
+  background: color-mix(in srgb, var(--warn) 12%, var(--surface));
+}
+.notice .ico { margin-top: .15em; color: var(--warn); }
+.notice .body { flex: 1; min-width: 0; }
+.notice code { display: block; margin-top: .5em; font: .9em var(--font-mono); word-break: break-all; color: var(--muted); }
+.notice code:empty { display: none; }
+
+/* 「いま｜統計」のタブは本体の部品（`/_host/ui.css` の spoitable-tabs）。ここは置き場の余白だけ（上を空け、下は詰める）。 */
+.pane-tabs { margin: 1em 0 0 -.75em; }
+
+/* 統計 */
+.daynav { display: flex; align-items: center; gap: .4em; flex-wrap: wrap; margin-top: 1em; }
+.daynav .step { width: 2.15em; padding: 0; }
+.tiles.three { grid-template-columns: repeat(3, 1fr); }
+.dayrange { margin-top: .7em; color: var(--muted); font-size: .85em; font-variant-numeric: tabular-nums; }
+.graph { position: relative; margin-top: .4em; height: 16em; }
+/* 引いて巻くのは JS（ホイール）が受ける。ブラウザの既定の巻き・選択はさせない。 */
+.graph canvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; user-select: none; }
+.graphtip {
+  position: absolute; pointer-events: none; padding: .25em .55em; font-size: .8em; white-space: nowrap;
+  border: 1px solid var(--border); border-radius: .35em; background: var(--pop); color: var(--fg);
+  box-shadow: var(--shadow-pop); font-variant-numeric: tabular-nums;
+}
+.hint { margin-top: .4em; color: var(--faint); font-size: .75em; }
+
+/* OBS に貼る URL。**選んでコピーできる形**で出す（打ち直させない）。 */
+.urls { display: flex; flex-direction: column; gap: .4em; margin-top: .6em; }
+.url {
+  display: flex; align-items: center; gap: .7em; padding: .4em .5em .4em .8em;
+  border: 1px solid var(--border); border-radius: .45em; background: var(--surface);
+}
+.url code { flex: 1; font: .85em var(--font-mono); color: var(--fg); word-break: break-all; }

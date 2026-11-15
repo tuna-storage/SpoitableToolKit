@@ -1,0 +1,97 @@
+# job を分けるのは権限を分けるため: build（全部の build script と action が走る）は repo へ書けず、
+# release（Release を作るだけ）は contents: write だけを持つ。秘密は GITHUB_TOKEN のほかに要らない。
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  build:
+    # 入っているアプリはこの repo の Release を見に来る（Updates/VelopackUpdateSource.cs）。開発の repo では走らせない。
+    if: github.repository == 'tuna-storage/SpoitableToolKit'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The version, and what changed in it
+        id: version
+        # tag は script の文字ではなく変数で渡す。
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          [xml] $props = Get-Content Directory.Build.props -Raw
+          $version = @($props.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ })[0]
+          if (-not $version) { Write-Error "no Version in Directory.Build.props"; exit 1 }
+          if ($version.Contains('-')) { Write-Error "a stable version has no '-': $version"; exit 1 }
+          if ($env:TAG -cne "v$version") { Write-Error "tag $env:TAG, Directory.Build.props $version"; exit 1 }
+          ./.github/scripts/release-notes.ps1 -Version $version -Out artifacts/notes.md
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Tools
+        run: |
+          dotnet tool restore
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Build
+        run: |
+          dotnet build SpoitableToolKit.slnx -c Release -nologo
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ./.github/scripts/pack.ps1 -Version $env:VERSION -Channel stable -Notes artifacts/notes.md -Out artifacts/packages
+          Copy-Item artifacts/notes.md artifacts/packages/notes.md
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packages
+          path: artifacts/packages/
+          if-no-files-found: error
+          retention-days: 3
+
+  release:
+    needs: build
+    if: github.repository == 'tuna-storage/SpoitableToolKit'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: packages
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        # 先に下書きで全部を載せてから公開する。入っているアプリは「最新の Release」（releases/latest）の
+        # releases.stable.json を読むので、載せ終わる前の Release が最新にならないように。
+        run: |
+          $files = @(Get-ChildItem packages -File | Where-Object Name -ne 'notes.md' | ForEach-Object FullName)
+          gh release create $env:TAG @files --repo $env:REPOSITORY --draft --verify-tag --title "SpoitableToolKit $env:TAG" --notes-file packages/notes.md
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          gh release edit $env:TAG --repo $env:REPOSITORY --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { exit 1 }

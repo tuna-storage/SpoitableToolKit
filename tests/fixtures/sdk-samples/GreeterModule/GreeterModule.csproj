@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- API を渡す側の見本。契約の dll は、このモジュールが shared/ に持っていく。 -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>1.0.0</Version>
+    <SpoitableModuleId>greeter</SpoitableModuleId>
+    <SpoitableModuleName>Greeter</SpoitableModuleName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 本物の project は、ここに版を数字で書く。試験は、いま作ったパッケージの版を置き場の Directory.Build.props から渡す。 -->
+    <PackageReference Include="SpoitableToolKit.Sdk" Version="$(SpoitableSdkVersionUnderTest)" />
+
+    <ProjectReference Include="..\Greetings.Contract\Greetings.Contract.csproj" SpoitableContract="Provide" />
+  </ItemGroup>
+
+</Project>

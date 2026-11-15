@@ -1,0 +1,111 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- hrs を参照するので、そちらの TFM に合わせる (低い TFM からは参照できない)。 -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <!-- Host は RID 固定の WinExe なので、参照する側も合わせる。 -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <UseWindowsForms>true</UseWindowsForms>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>SpoitableToolKit.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.*" />
+    <!-- SDK のアナライザー（STK040〜）に、コードの断片を読ませる試験のため。版はアナライザーが参照するものと同じにする。 -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SpoitableToolKit.Host\SpoitableToolKit.Host.csproj" />
+
+    <!-- SDK のアナライザーを、ふつうの dll として参照する（試験が型を作って走らせる。この試験の project 自身には効かせない）。 -->
+    <ProjectReference Include="..\..\src\SpoitableToolKit.Sdk.Analyzers\SpoitableToolKit.Sdk.Analyzers.csproj" />
+
+    <!-- 同梱モジュールの、ALC と関係のない素のロジック（FailureLog）を直接試験するための参照。
+         下の見本モジュールと違って ReferenceOutputAssembly を切らないのは、ここで見たいのが
+         「読み込まれ方」ではなく「並べ方・数え方」だから。読み込み経路の試験は見本の側でやる。 -->
+    <ProjectReference Include="..\..\src\SpoitableToolKit.Modules\VideoUrl\SpoitableToolKit.Modules.VideoUrl.csproj" />
+
+    <!-- 同じ理由で hrs も参照する。見たいのは BLE ではなく、その手前の
+         心拍ループ・パラメータの計算・パケットの読み方（WinRT に触らない層）。 -->
+    <ProjectReference Include="..\..\src\SpoitableToolKit.Modules\Hrs\SpoitableToolKit.Modules.Hrs.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 検証用のモジュール一式。
+         **ProjectReference で参照してはいけない**（ReferenceOutputAssembly="false" はビルド順のためだけ）。
+         参照するとテストの出力に dll が並び、モジュールの ALC ではなく既定コンテキストから
+         解決されてしまう。それだと「ALC をまたいで型が一致する」という肝心の性質を
+         試験しないまま緑になる。 -->
+    <FixtureProject Include="..\fixtures\TestContract\TestContract.csproj" Destination="fixtures\shared\TestContract" />
+    <FixtureProject Include="..\fixtures\ProviderModule\ProviderModule.csproj" Destination="fixtures\modules\provider" />
+    <FixtureProject Include="..\fixtures\ConsumerModule\ConsumerModule.csproj" Destination="fixtures\modules\consumer" />
+    <FixtureProject Include="..\fixtures\BrokenConfigModule\BrokenConfigModule.csproj" Destination="fixtures\modules\brokenconfig" />
+    <FixtureProject Include="..\fixtures\ReservedIdModule\ReservedIdModule.csproj" Destination="fixtures\modules\host" />
+
+    <!-- SDK の決まりで作った見本（外の repo のモジュールと同じ書き方）。上の、読み込みを見るための手組みの見本とは分けて置く。 -->
+    <FixtureProject Include="..\fixtures\SampleModule\SampleModule.csproj" Destination="fixtures\sdk\sample" />
+    <ProjectReference Include="@(FixtureProject)" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+  <!--
+    本体の辞書を出力に置き直す。Host・Hrs・VideoUrl のどれも locales/<言語>.json を出力へ配るので、
+    この project の出力では同じ場所に重なり、**時刻がいちばん新しいものが残る**。
+    試験が AppContext.BaseDirectory から読むのは本体の辞書なので、最後に本体のものを置く。
+  -->
+  <Target Name="DeployHostLocales" AfterTargets="Build">
+    <ItemGroup>
+      <_HostLocale Include="..\..\src\SpoitableToolKit.Host\locales\*.json" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_HostLocale)" DestinationFolder="$(OutDir)locales" SkipUnchangedFiles="false" />
+  </Target>
+
+  <!--
+    モジュールを作る側のパッケージ（SpoitableToolKit.Sdk）を、出力の sdk/ に作る。SdkPackageTests が、これだけを入れ元にして
+    repo の外で見本のモジュールを build する（nuget.org へは出ない）。
+    API の project はもう build されている（Host が参照している）ので、ここでは詰めるだけ。前の版のパッケージが残らないように、先に消す。
+  -->
+  <Target Name="PackSdk" AfterTargets="Build">
+    <RemoveDir Directories="$(OutDir)sdk" />
+    <!-- RemoveProperties: この project に渡された -f・-r を API の project へ継がせない（継ぐと、build していない別の出力を詰めに行く）。 -->
+    <MSBuild Projects="..\..\src\SpoitableToolKit.Abstractions\SpoitableToolKit.Abstractions.csproj" Targets="Pack"
+             Properties="NoBuild=true;PackageOutputPath=$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(OutDir)', 'sdk'))"
+             RemoveProperties="TargetFramework;RuntimeIdentifier;SelfContained" />
+  </Target>
+
+  <!--
+    配る前に fixtures/ を丸ごと消す。**コピーだけだと取り残しが残り、試験が偽の緑になる。**
+    見本の Destination を変えると出力に古い配置と新しい配置が両方並び、ローダの試験は
+    Install("modules/consumer", ...) と名前で掴むので、もう配られていない見本を見たまま通る。
+
+    ここは Host 側の modules/ と違って、丸ごと消してよい。中身が全部この target の生成物で、
+    手で置くもの (.disabled マーカーなど) が無いため。Host 側は実行時のディレクトリでもあるので、
+    要らないものだけを選んで消している (SpoitableToolKit.Host.csproj の DeployBundledModules)。
+  -->
+  <Target Name="CleanFixtures" AfterTargets="Build" BeforeTargets="DeployFixtures">
+    <RemoveDir Directories="$(OutDir)fixtures" />
+  </Target>
+
+  <!-- 出力の fixtures/ に「実行時と同じディレクトリ構成」を作る。テストはここを探索ルートとして渡す。 -->
+  <Target Name="DeployFixtures" AfterTargets="Build" DependsOnTargets="CleanFixtures"
+          Outputs="%(FixtureProject.Identity)">
+    <PropertyGroup>
+      <_FixtureOutput>%(FixtureProject.RootDir)%(FixtureProject.Directory)bin\$(Configuration)\net10.0\</_FixtureOutput>
+      <!-- Copy の変換式からは別の項目のメタデータを引けないので、batch ごとに property へ落とす。 -->
+      <_FixtureDestination>$(OutDir)%(FixtureProject.Destination)</_FixtureDestination>
+    </PropertyGroup>
+    <ItemGroup>
+      <!-- batch ごとに作り直す。消さないと前の見本のファイルが混ざる。 -->
+      <_FixtureFile Remove="@(_FixtureFile)" />
+      <_FixtureFile Include="$(_FixtureOutput)**\*.*" />
+    </ItemGroup>
+    <!-- 直前に消しているので SkipUnchangedFiles は効かない。見本は 3 つで数ファイルなので構わない。 -->
+    <Copy SourceFiles="@(_FixtureFile)"
+          DestinationFiles="@(_FixtureFile->'$(_FixtureDestination)\%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+
+</Project>

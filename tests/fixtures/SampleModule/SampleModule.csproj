@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <!-- 外の repo のモジュールと同じ書き方（SDK の決まりは、隣の Directory.Build.props / .targets が読み込む）。 -->
+    <SpoitableModuleId>sample</SpoitableModuleId>
+    <SpoitableModuleName>Sample</SpoitableModuleName>
+    <!-- 管理画面に出る版（dll の版）。e2e が「入れたものの版」として見る。 -->
+    <Version>1.2.3</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- モジュールが自分で持ってくるファイル。出力へ配られ、modules/<Id>/data/ に入る（試験が ModuleInfo.ModuleDirectory から開かせる）。 -->
+    <None Update="data\shipped.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

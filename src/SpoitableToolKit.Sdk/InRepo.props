@@ -1,0 +1,18 @@
+<Project>
+
+  <!--
+    この repo の中のモジュールが、パッケージ（PackageReference Include="SpoitableToolKit.Sdk"）の代わりに読むもの（前半）。
+    **読み込む所は Directory.Build.props**（NuGet がパッケージの build/*.props を読み込むのと同じ、project の本体より前）。
+    csproj の本体に Import を書くと、読まれる順番がパッケージのときと変わる。
+
+    repo 直下の Directory.Build.props より後に読むこと（SDK の版 = この repo の版）。
+  -->
+
+  <PropertyGroup>
+    <!-- パッケージでは、作るときに焼いた版が入る（build/SpoitableToolKit.Sdk.Version.props）。 -->
+    <SpoitableSdkVersion>$(Version)</SpoitableSdkVersion>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)build\SpoitableToolKit.Sdk.props" />
+
+</Project>

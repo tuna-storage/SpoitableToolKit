@@ -1,0 +1,76 @@
+{
+  "default_bindings": [
+    {
+      "controller_type": "oculus_touch",
+      "binding_url": "bindings_oculus_touch.json"
+    },
+    {
+      "controller_type": "knuckles",
+      "binding_url": "bindings_knuckles.json"
+    },
+    {
+      "controller_type": "vive_controller",
+      "binding_url": "bindings_vive_controller.json"
+    }
+  ],
+  "actions": [
+    {
+      "name": "/actions/pointer/in/aim",
+      "type": "pose"
+    },
+    {
+      "name": "/actions/pointer/in/click",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/pointer/in/grab",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/pointer/out/haptic",
+      "type": "vibration"
+    },
+    {
+      "name": "/actions/layout/in/block",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/layout/in/block_pos",
+      "type": "vector2"
+    }
+  ],
+  "action_sets": [
+    {
+      "name": "/actions/pointer",
+      "usage": "leftright"
+    },
+    {
+      "name": "/actions/layout",
+      "usage": "leftright"
+    }
+  ],
+  "localization": [
+    {
+      "language_tag": "en_US",
+      "/actions/pointer": "Pointer (wrist and window overlays)",
+      "/actions/pointer/in/aim": "Aim",
+      "/actions/pointer/in/click": "Press (hold and move to scroll a window)",
+      "/actions/pointer/in/grab": "Grab (move a board)",
+      "/actions/pointer/out/haptic": "Haptics",
+      "/actions/layout": "Layout Mode (holds every input while boards are being moved)",
+      "/actions/layout/in/block": "Held during Layout Mode (buttons)",
+      "/actions/layout/in/block_pos": "Held during Layout Mode (sticks and pads)"
+    },
+    {
+      "language_tag": "ja_JP",
+      "/actions/pointer": "ポインタ（手首の板と窓）",
+      "/actions/pointer/in/aim": "狙い",
+      "/actions/pointer/in/click": "押す（窓は引いたまま動かすと巻ける）",
+      "/actions/pointer/in/grab": "掴む（板を動かす）",
+      "/actions/pointer/out/haptic": "振動",
+      "/actions/layout": "Layout Mode（板を動かしている間、入力をすべて預かる）",
+      "/actions/layout/in/block": "Layout Mode の間は預かる（ボタン）",
+      "/actions/layout/in/block_pos": "Layout Mode の間は預かる（スティック・パッド）"
+    }
+  ]
+}

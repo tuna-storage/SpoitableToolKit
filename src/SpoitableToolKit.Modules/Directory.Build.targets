@@ -1,0 +1,21 @@
+<Project>
+
+  <!-- 同梱のモジュールも、外の repo のモジュールと同じ決まりで作る（パッケージの代わりに、同じファイルを読む）。 -->
+  <Import Project="$(MSBuildThisFileDirectory)..\SpoitableToolKit.Sdk\InRepo.targets" />
+
+  <!--
+    同梱モジュールを Host の出力へ配るために、Host 側から問い合わせるための入口。
+    ここで返すのは「どこに何が出来たか」だけで、コピーは Host が行う
+    (モジュール側が Host の出力パスを知っていると、単体ビルドが Host に依存してしまう)。
+  -->
+  <Target Name="GetModuleDeployInfo" DependsOnTargets="Build" Returns="@(ModuleDeployInfo)">
+    <ItemGroup>
+      <!-- Id は SDK の決まりが build の頭で確かめている（空・字が外れている・本体の名前）。 -->
+      <ModuleDeployInfo Include="$(TargetPath)">
+        <ModuleId>$(SpoitableModuleId)</ModuleId>
+        <ModuleOutputDirectory>$(TargetDir)</ModuleOutputDirectory>
+      </ModuleDeployInfo>
+    </ItemGroup>
+  </Target>
+
+</Project>

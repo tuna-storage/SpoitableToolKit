@@ -1,0 +1,21 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SpoitableToolKit.Abstractions/SpoitableToolKit.Abstractions.csproj" />
+    <Project Path="src/SpoitableToolKit.Sdk.Analyzers/SpoitableToolKit.Sdk.Analyzers.csproj" />
+    <Project Path="src/SpoitableToolKit.Host/SpoitableToolKit.Host.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SpoitableToolKit.Tests/SpoitableToolKit.Tests.csproj" />
+    <Project Path="tests/SpoitableToolKit.E2E/SpoitableToolKit.E2E.csproj" />
+    <Project Path="tests/fixtures/TestContract/TestContract.csproj" />
+    <Project Path="tests/fixtures/ProviderModule/ProviderModule.csproj" />
+    <Project Path="tests/fixtures/ConsumerModule/ConsumerModule.csproj" />
+    <Project Path="tests/fixtures/BrokenConfigModule/BrokenConfigModule.csproj" />
+    <Project Path="tests/fixtures/ReservedIdModule/ReservedIdModule.csproj" />
+    <Project Path="tests/fixtures/SampleModule/SampleModule.csproj" />
+  </Folder>
+  <Folder Name="/modules/">
+    <Project Path="src/SpoitableToolKit.Modules/VideoUrl/SpoitableToolKit.Modules.VideoUrl.csproj" />
+    <Project Path="src/SpoitableToolKit.Modules/Hrs/SpoitableToolKit.Modules.Hrs.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29">
+  <!-- サイドバーの頭のロゴ（shell.css の .sidebar .brand .mark）と同じ比。1em = 20: 地 1.45em・角 .35em・ハート .85em を真ん中。
+       色は accent と on-accent（themes/dark/theme.css）。形を変えるときは shell.css と index.html の buildSidebar も揃え、
+       tools/app-icon/make-icon.ps1 で .ico を作り直す。 -->
+  <rect width="29" height="29" rx="7" fill="#2563eb"/>
+  <svg id="heart" x="6" y="6" width="17" height="17" viewBox="0 0 24 24">
+    <path fill="#ffffff" d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7Z"/>
+  </svg>
+</svg>

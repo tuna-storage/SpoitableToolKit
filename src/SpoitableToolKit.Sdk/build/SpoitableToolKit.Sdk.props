@@ -1,0 +1,21 @@
+<Project>
+
+  <!--
+    モジュールを作る側の build の決まり（前半）。パッケージ SpoitableToolKit.Sdk の build/ に入り、
+    参照した project の**本体より前**に読み込まれる（repo の中のモジュールは ../InRepo.props 経由で同じものを読む）。
+
+    ここに置くのは、project の本体より前に決まっていないと効かない既定だけ。
+    web/ や locales/ を出力へ配る指定は .targets の側（ここは既定の項目より前に読まれるので、置いても 1 つも当たらない）。
+  -->
+
+  <!-- SDK の版。パッケージを作るときに、版を焼いたファイルが隣に入る（repo の中には無い。InRepo.props が入れる）。 -->
+  <Import Project="$(MSBuildThisFileDirectory)SpoitableToolKit.Sdk.Version.props"
+          Condition="Exists('$(MSBuildThisFileDirectory)SpoitableToolKit.Sdk.Version.props')" />
+
+  <PropertyGroup>
+    <!-- モジュールは本体が動いている途中で読み込む dll。NuGet の依存も出力へ持ってこさせる
+         （これが無いと、依存が増えたときにモジュールのフォルダだけ dll が欠ける）。 -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+</Project>

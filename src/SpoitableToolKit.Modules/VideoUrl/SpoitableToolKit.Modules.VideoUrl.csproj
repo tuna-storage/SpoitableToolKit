@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>SpoitableToolKit.Modules.VideoUrl</RootNamespace>
+    <!-- モジュールの Id と名前。フォルダ名（modules/<Id>/）・module.json・ModuleInfo.Id / Name はここから作られる。
+         Abstractions への参照・web/ と locales/ の配り方・動的に読み込まれる側の設定は、SDK の決まり
+         （../Directory.Build.props / .targets が読み込む）が持っている。 -->
+    <SpoitableModuleId>videourl</SpoitableModuleId>
+    <SpoitableModuleName>Video URL</SpoitableModuleName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 試験から中身を見るため。モジュールの public な面は ISpoitableModule と IModuleConfig だけに保つ。 -->
+    <InternalsVisibleTo Include="SpoitableToolKit.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ホスト本体も持っているが、モジュールは単体で完結していてよい。
+         同名のアセンブリはローダがホスト側へ寄せる（型が二重にならない）。 -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.*" />
+  </ItemGroup>
+
+</Project>

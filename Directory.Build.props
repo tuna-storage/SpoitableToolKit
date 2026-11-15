@@ -1,0 +1,18 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- YYYY.M.BUILD -->
+    <Version>2026.11.0</Version>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- 配る物（Release）に、build した PC のパスを残さない（dll の中の PDB のパス・スタックトレースのファイル名）。 -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
+  </PropertyGroup>
+
+</Project>

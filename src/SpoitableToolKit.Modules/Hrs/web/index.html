@@ -1,0 +1,996 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Heart Rate</title>
+<!-- 本体の部品（タブ・選ぶ欄。`spoitable-` の class だけに当たる）。シェルと同じ 1 枚。**骨格より先に読む**（骨格が置き場の余白を上書きする）。 -->
+<link rel="stylesheet" href="/_host/ui.css">
+<!-- 骨格。色は持たない。**テーマより先に読む** — 後から来た方が勝つので、
+     この順にしておくとテーマが !important 無しで上書きできる。 -->
+<link rel="stylesheet" href="/panel.css">
+<!-- 色・影・フォント。シェルもパネルも同じ 1 枚を引く（`_host/` は URL のホストに
+     関わらずシェルの web/ から配られるので、これは同一 origin）。 -->
+<link rel="stylesheet" href="/_host/theme.css">
+</head>
+<body>
+
+<header class="head">
+  <h1 data-i18n="hrs.panel.title"></h1>
+  <span class="state off" id="state"><span class="dot"></span><span id="stateText"></span></span>
+  <span class="spacer"></span>
+  <button id="toggle"></button>
+</header>
+<div class="device" id="device"></div>
+<div class="empty" id="toggleHint"></div>
+
+<!-- 「いま｜統計」。本体のタブ（`/_host/ui.css`）。上下の余白だけこのページのもの（pane-tabs）。 -->
+<nav class="spoitable-tabs pane-tabs" role="tablist">
+  <button class="spoitable-tab spoitable-tab-on" id="tabNow" data-tab="now" role="tab" aria-selected="true" data-i18n="hrs.panel.tab.now"></button>
+  <button class="spoitable-tab" id="tabStats" data-tab="stats" role="tab" aria-selected="false" data-i18n="hrs.panel.tab.stats"></button>
+</nav>
+
+<div class="pane" id="paneNow">
+  <div class="notice hidden" id="firewall">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 10v4"/><path d="M12 17.5v.01"/></svg>
+    <div class="body">
+      <div id="firewallText"></div>
+      <div class="controls">
+        <button id="addRule"></button>
+        <span class="empty" data-i18n="hrs.panel.firewall.uac"></span>
+      </div>
+      <code id="firewallCommand"></code>
+    </div>
+  </div>
+
+  <div class="tiles">
+    <div class="tile big">
+      <svg class="ico heart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20.5s-8-4.8-8-11A4.5 4.5 0 0 1 12 6.8 4.5 4.5 0 0 1 20 9.5c0 6.2-8 11-8 11z"/></svg>
+      <div class="num"><span class="bpm off" id="bpm">—</span><span class="unit">bpm</span></div>
+    </div>
+    <div class="tile"><span class="label" data-i18n="hrs.panel.stats.min"></span><b id="min">—</b></div>
+    <div class="tile"><span class="label" data-i18n="hrs.panel.stats.avg"></span><b id="avg">—</b></div>
+    <div class="tile"><span class="label" data-i18n="hrs.panel.stats.max"></span><b id="max">—</b></div>
+  </div>
+
+  <div class="chart card">
+    <svg id="chart" viewBox="0 0 300 90" preserveAspectRatio="none"><path id="line" d=""></path></svg>
+    <div class="stats"><span id="span"></span></div>
+  </div>
+
+  <section>
+    <h2 data-i18n="hrs.panel.ws.title"></h2>
+    <div class="empty" id="wsState"></div>
+    <div class="urls hidden" id="urls"></div>
+  </section>
+
+  <section>
+    <h2 data-i18n="hrs.panel.devices.title"></h2>
+    <div class="devices" id="devices"></div>
+  </section>
+</div>
+
+<!-- 統計。**記録の欄もここ**（件数・書き出し）。 -->
+<div class="pane hidden" id="paneStats">
+  <div class="daynav">
+    <button class="step" id="dayPrev" data-i18n-title="hrs.panel.history.prev">‹</button>
+    <!-- 日付だけの欄。ネイティブの暦は VR に出ないので `_host/when.js` が被せる。`required` = 「消す」を出さない。 -->
+    <input type="date" id="day" required>
+    <button class="step" id="dayNext" data-i18n-title="hrs.panel.history.next">›</button>
+    <button id="dayToday" data-i18n="hrs.panel.history.today"></button>
+    <button class="hidden" id="zoomReset" data-i18n="hrs.panel.history.reset"></button>
+  </div>
+
+  <!-- ⚠ **id を「いま」のタイルと分ける**（#min / #avg / #max は「いま」の繋がりの数字）。 -->
+  <div class="tiles three">
+    <div class="tile"><span class="label" data-i18n="hrs.panel.stats.min"></span><b id="dayMin">—</b></div>
+    <div class="tile"><span class="label" data-i18n="hrs.panel.stats.avg"></span><b id="dayAvg">—</b></div>
+    <div class="tile"><span class="label" data-i18n="hrs.panel.stats.max"></span><b id="dayMax">—</b></div>
+  </div>
+
+  <div class="dayrange" id="dayRange"></div>
+  <div class="graph card" id="graphWrap">
+    <canvas id="graph"></canvas>
+    <div class="graphtip hidden" id="graphTip"></div>
+  </div>
+  <div class="hint" data-i18n="hrs.panel.history.hint"></div>
+
+  <section>
+    <h2 data-i18n="hrs.panel.records.title"></h2>
+    <div class="empty" id="recordState"></div>
+    <div class="controls">
+      <select id="range">
+        <option value="0" data-i18n="hrs.panel.records.range.all"></option>
+        <option value="24" data-i18n="hrs.panel.records.range.day"></option>
+        <option value="168" data-i18n="hrs.panel.records.range.week"></option>
+        <option value="view" data-i18n="hrs.panel.records.range.view"></option>
+      </select>
+      <button id="export"></button>
+      <span class="empty" id="exported"></span>
+    </div>
+  </section>
+</div>
+
+<!-- ネイティブの <select> と title・暦は VR の面に乗らない（別レイヤーで飛んでくる）ので、
+     ページの中に描くものへ被せる。シェルと同じ 1 枚を引いている。 -->
+<script src="/_host/pick.js"></script>
+<script src="/_host/when.js"></script>
+<script src="/_host/tip.js"></script>
+<script src="/_host/bridge.js"></script>
+<script>
+const el = {
+  bpm: document.getElementById('bpm'),
+  state: document.getElementById('state'),
+  stateText: document.getElementById('stateText'),
+  device: document.getElementById('device'),
+  line: document.getElementById('line'),
+  min: document.getElementById('min'),
+  max: document.getElementById('max'),
+  avg: document.getElementById('avg'),
+  span: document.getElementById('span'),
+  devices: document.getElementById('devices'),
+  toggle: document.getElementById('toggle'),
+  toggleHint: document.getElementById('toggleHint'),
+  firewall: document.getElementById('firewall'),
+  firewallText: document.getElementById('firewallText'),
+  firewallCommand: document.getElementById('firewallCommand'),
+  addRule: document.getElementById('addRule'),
+  wsState: document.getElementById('wsState'),
+  urls: document.getElementById('urls'),
+  recordState: document.getElementById('recordState'),
+  range: document.getElementById('range'),
+  export: document.getElementById('export'),
+  exported: document.getElementById('exported'),
+
+  paneNow: document.getElementById('paneNow'),
+  paneStats: document.getElementById('paneStats'),
+  day: document.getElementById('day'),
+  dayPrev: document.getElementById('dayPrev'),
+  dayNext: document.getElementById('dayNext'),
+  dayToday: document.getElementById('dayToday'),
+  zoomReset: document.getElementById('zoomReset'),
+  dayMin: document.getElementById('dayMin'),
+  dayAvg: document.getElementById('dayAvg'),
+  dayMax: document.getElementById('dayMax'),
+  dayRange: document.getElementById('dayRange'),
+  graphWrap: document.getElementById('graphWrap'),
+  graph: document.getElementById('graph'),
+  graphTip: document.getElementById('graphTip'),
+};
+
+// 正となる状態は全部 C# 側。ここはその写しでしかない。
+// パネルは開かれていないことのほうが多いので、読み込み時に一度取りに行き、以降を onPush で受ける。
+
+// 繋ぎ方の表示名。値は C# 側の HeartRateConnection と対応する。
+const CONNECTION = {
+  bleGatt: 'BLE (GATT)',
+  bleBroadcastPolar: 'BLE (Broadcast Polar)',
+  hds: 'HDS',
+};
+
+function render(status) {
+  const bpm = status.heartRate | 0;
+
+  el.bpm.textContent = bpm > 0 ? bpm : '—';
+  el.bpm.classList.toggle('off', bpm <= 0);
+
+  // 「受信中」は心拍が届いている間だけ。繋がっているのに来ないなら「接続済み・心拍なし」（充電器の上・繋がった直後）。
+  el.state.className = 'state ' + (!status.connected ? 'off' : status.receiving ? 'on' : 'quiet');
+
+  // **どの入口から来ているか**を出す。BLE と HDS は勝手に乗り換わるので、
+  // 「受信中」だけだと、いま何が心拍を運んでいるのか分からない。
+  const via = CONNECTION[status.connection] || status.connection;
+  el.stateText.textContent = !status.connected
+    ? spoitable.t('hrs.panel.state.disconnected')
+    : spoitable.t(status.receiving ? 'hrs.panel.state.receiving' : 'hrs.panel.state.noHeartRate', via);
+
+  // 繋がっていないときは**何を探しているのか**を出す。設定を開かないと分からない、を作らない。
+  // 電池は GATT で繋がっているときだけ来る（広告と時計からは読めない）。
+  const battery = Number.isInteger(status.battery) ? ` · ${spoitable.t('hrs.panel.device.battery', status.battery)}` : '';
+  // 手で切ってあれば、探しているとは言わない（「接続」を押すまで、その 1 台には繋ぎ直さない）。
+  el.device.textContent = status.device
+    ? (status.address && status.address !== status.device ? `${status.device}（${status.address}）` : status.device) + battery
+    : status.heldOff
+      ? spoitable.t('hrs.panel.device.heldOff', status.heldOff)
+      : status.configured
+        ? spoitable.t('hrs.panel.device.searching', status.configured)
+        : spoitable.t('hrs.panel.device.hint');
+
+  // 「切断」は繋がっている 1 台だけを切る。切ってあって何も繋がっていなければ「接続」で戻す。止めてあれば「接続」。
+  const offerConnect = !status.running || (!status.connected && !!status.heldOff);
+  el.toggle.textContent = spoitable.t(offerConnect ? 'hrs.panel.connect' : 'hrs.panel.disconnect');
+  el.toggle.dataset.method = offerConnect ? 'connect' : 'disconnect';
+  el.toggleHint.textContent = !status.running
+    ? spoitable.t('hrs.panel.stopped')
+    : !status.connected && status.heldOff
+      ? spoitable.t('hrs.panel.heldOff')
+      : '';
+
+  // 通れなさそうなときだけ出す。**「見えない = 必ず届かない」ではない**ので、
+  // 断定せずに、押せる直し方と手で打つ 1 行を並べる。
+  // **ブロックのときこそ出す** — Windows のプロンプトでキャンセルすると作られ、
+  // ブロックは許可より強いので、放っておくと二度と届かない。
+  const blocked = status.firewall === 'blocked';
+  const trouble = status.hdsEnabled && (blocked || status.firewall === 'missing');
+  el.firewall.classList.toggle('hidden', !trouble);
+
+  if (trouble) {
+    el.firewallText.textContent = spoitable.t(
+      blocked ? 'hrs.panel.firewall.blocked' : 'hrs.panel.firewall.missing', status.hdsPort);
+
+    el.addRule.textContent = spoitable.t(
+      blocked ? 'hrs.panel.firewall.unblock' : 'hrs.panel.firewall.add');
+    el.firewallCommand.textContent = blocked ? '' : (status.firewallCommand || '');
+  }
+
+  renderStats(status.stats);
+  renderChart(status.samples ?? []);
+  renderBroadcast(status);
+  renderRecords(status);
+  renderDevices(status.discovered ?? [], status.device);
+}
+
+/// 配信の様子。**始められたかどうかは始めてみるまで分からない**ので、
+/// 押した結果はここに出る（設定画面には戻ってこない）。
+function renderBroadcast(status) {
+  const listening = status.wsStatus === 'listening';
+
+  el.wsState.textContent = !status.wsEnabled
+    ? spoitable.t('hrs.panel.ws.off')
+    : listening
+      ? spoitable.t('hrs.panel.ws.listening', status.wsPort, status.wsClients | 0)
+      : spoitable.t('hrs.panel.ws.failed', status.wsPort, status.wsError || '');
+
+  el.urls.classList.toggle('hidden', !listening);
+  if (!listening) return;
+
+  el.urls.replaceChildren(...(status.overlays ?? []).map(name => {
+    const url = `http://localhost:${status.wsPort}/overlay/${name}`;
+
+    const row = document.createElement('div');
+    row.className = 'url';
+
+    const code = document.createElement('code');
+    code.textContent = url;
+    row.appendChild(code);
+
+    const copy = document.createElement('button');
+    copy.textContent = spoitable.phrases.ui.copy;
+    copy.addEventListener('click', () => {
+      spoitable.copyToClipboard(url);
+      copy.textContent = spoitable.phrases.ui.copied;
+      setTimeout(() => { copy.textContent = spoitable.phrases.ui.copy; }, 1500);
+    });
+    row.appendChild(copy);
+
+    return row;
+  }));
+}
+
+/// 記録。件数は毎拍数えていないので、パネルを開いた時と書き出した後に取り直される。
+function renderRecords(status) {
+  const count = Number(status.recordCount || 0);
+
+  el.recordState.textContent = count > 0
+    ? spoitable.t('hrs.panel.records.count', count, when(status.recordFirst), when(status.recordLast))
+    : status.recordingEnabled
+      ? spoitable.t('hrs.panel.records.empty')
+      : spoitable.t('hrs.panel.records.off');
+
+  el.export.textContent = spoitable.t('hrs.panel.records.export');
+  el.export.disabled = count === 0;
+
+  // 出した先を出す。パスが分からないと、出した人は探しに行けない。
+  el.exported.textContent = status.lastExport
+    ? spoitable.t('hrs.panel.records.exported', status.lastExport)
+    : '';
+}
+
+const pad = n => String(n).padStart(2, '0');
+
+/// 日時は読める形に。手元の時計で出す（記録は UTC で持っている）。
+/// **形はシェルの行と同じ**（yyyy/MM/dd HH:mm:ss）。
+/// toLocaleString は環境の言語で形が変わるので使わない。
+function when(iso) {
+  if (!iso) return '';
+
+  const at = new Date(iso);
+  if (isNaN(at)) return iso;
+
+  return `${at.getFullYear()}/${pad(at.getMonth() + 1)}/${pad(at.getDate())} `
+    + `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`;
+}
+
+/// 最小・平均・最大は**この繋がりの**数字で、C# が数える（繋がるたびに 0 から）。
+/// グラフ（直近 3 分）からは数えない — オーバーレイとダッシュボードの札と同じ数字にするため。
+function renderStats(stats) {
+  el.min.textContent = stats ? stats.min : '—';
+  el.avg.textContent = stats ? stats.avg : '—';
+  el.max.textContent = stats ? stats.max : '—';
+}
+
+/// 折れ線は SVG で直接引く。ライブラリを入れるほどの図ではないし、
+/// パネルは別 origin なので依存を足すとそのぶん配るものが増える。
+function renderChart(samples) {
+  // 切れていた所は 0 で届く（線を 0 まで落とす）。
+  const values = samples.map(s => s.bpm);
+  const beats = values.filter(v => v > 0).length;
+
+  if (beats < 2) {
+    el.line.setAttribute('d', '');
+    el.span.textContent = '';
+    return;
+  }
+
+  // 縦の幅は**見えている線の**上下（タイルの数字ではない。繋がりの最小に合わせると直近の線が潰れる）。
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+
+  // 平坦なときに線が枠へ張り付かないよう、上下に少し余白を作る。
+  const low = min === max ? min - 1 : min;
+  const high = min === max ? max + 1 : max;
+
+  const points = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * 300;
+    const y = 85 - ((v - low) / (high - low)) * 80;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+
+  el.line.setAttribute('d', 'M' + points.join(' L'));
+  el.span.textContent = spoitable.t('hrs.panel.chart.recent', beats);
+}
+
+function renderDevices(found, connected) {
+  if (!found.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = spoitable.t('hrs.panel.devices.empty');
+    el.devices.replaceChildren(empty);
+    return;
+  }
+
+  el.devices.replaceChildren(...found.map(name => {
+    const row = document.createElement('div');
+    row.className = 'found';
+    row.dataset.device = name;
+
+    const label = document.createElement('span');
+    label.textContent = name;
+    row.appendChild(label);
+
+    // 繋がっている先は分かるようにする。一覧だけだと、どれに繋がったのか分からない。
+    if (connected && name.startsWith(connected)) {
+      row.classList.add('here');
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = spoitable.t('hrs.panel.devices.here');
+      row.appendChild(tag);
+    }
+
+    return row;
+  }));
+}
+
+let activeTab = 'now';
+
+function selectTab(name) {
+  activeTab = name;
+
+  for (const tab of document.querySelectorAll('.spoitable-tabs .spoitable-tab')) {
+    const on = tab.dataset.tab === name;
+    tab.classList.toggle('spoitable-tab-on', on);
+    tab.setAttribute('aria-selected', String(on));
+  }
+
+  el.paneNow.classList.toggle('hidden', name !== 'now');
+  el.paneStats.classList.toggle('hidden', name !== 'stats');
+
+  // 開くたびに読み直す（同じ日なら見ている範囲はそのまま）。**今日の線は開いている間は伸びない** —
+  // 伸ばすには「今日」を押すか、タブを開き直す。
+  if (name === 'stats') loadDay({ keepView: true });
+}
+
+for (const tab of document.querySelectorAll('.spoitable-tabs .spoitable-tab')) tab.addEventListener('click', () => selectTab(tab.dataset.tab));
+
+// 統計のグラフ:
+//  - 色はテーマのトークンから引く（テーマを替えたら描き直す）
+//  - ホイールで指した所を中心に拡大・縮小（VR はレーザーを引いて上下。グラフの上ではページを巻かない）
+//  - 0 bpm（計れていない）は数に入れず、線もそこで切る（記録には混ざっている）
+//  - 日の終わりは「次の日の 0 時 − 1」（+86400000 だと夏時間の日にずれる）
+
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
+const MIN_SPAN = 10 * 1000;   // いちばん深い拡大（1 秒刻みが見える）
+const GAP = 5 * MINUTE;       // これより空いたら線を切る
+const PAD = { l: 34, r: 10, t: 12, b: 20 };
+
+const daily = {
+  points: [],      // [[t, bpm], …]（t は UTC のエポックミリ秒、古い順）
+  day: [0, 0],     // 選んだ日の [始まり, 終わり]（両端を含む）
+  view: [0, 0],    // 見えている範囲
+  stack: [],       // ドラッグで拡大した履歴（ダブルクリックで 1 段戻る）
+  drag: null,      // { from, to, x, moved }
+  hover: null,     // [t, bpm]
+  loading: 0,      // 後から頼んだ読み込みが勝つための番号
+  colors: null,    // 最後に描いたときの色（試験から見る）
+};
+
+/** `YYYY-MM-DD` → その日の [0 時, 次の日の 0 時 − 1]。読めなければ今日。 */
+function dayBounds(value) {
+  const found = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? '');
+  const base = found ? new Date(Number(found[1]), Number(found[2]) - 1, Number(found[3])) : new Date();
+
+  const from = new Date(base.getFullYear(), base.getMonth(), base.getDate()).getTime();
+  const to = new Date(base.getFullYear(), base.getMonth(), base.getDate() + 1).getTime() - 1;
+  return [from, to];
+}
+
+function dayValue(date) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** 範囲の最小・平均・最大。**0 bpm は数えない**（計れていない時間）。1 件も無ければ null。 */
+function summarize(points, from, to) {
+  let min = Infinity;
+  let max = -Infinity;
+  let sum = 0;
+  let count = 0;
+
+  for (const [t, bpm] of points) {
+    if (t < from || t > to || bpm <= 0) continue;
+    if (bpm < min) min = bpm;
+    if (bpm > max) max = bpm;
+    sum += bpm;
+    count++;
+  }
+
+  return count ? { min, max, avg: Math.round(sum / count), count } : null;
+}
+
+/**
+ * ドラッグで選んだ範囲を、日の中に収まる見える範囲にする。**狭すぎれば 10 秒に広げ、
+ * 端にかかったら縮めずにずらす**（切り詰めると 10 秒より狭くなる）。
+ */
+function clampRange(a, b, [dayFrom, dayTo]) {
+  let lo = Math.min(a, b);
+  let hi = Math.max(a, b);
+
+  if (hi - lo < MIN_SPAN) {
+    const middle = (lo + hi) / 2;
+    lo = middle - MIN_SPAN / 2;
+    hi = middle + MIN_SPAN / 2;
+  }
+  if (lo < dayFrom) { hi += dayFrom - lo; lo = dayFrom; }
+  if (hi > dayTo) { lo -= hi - dayTo; hi = dayTo; }
+
+  return [Math.round(Math.max(dayFrom, lo)), Math.round(hi)];
+}
+
+/**
+ * 指した所（anchor）を中心に拡大・縮小する。**指した時刻は画面の同じ位置に残る**。
+ * factor < 1 で拡大。狭くても 10 秒、広くても 1 日。
+ */
+function zoomAround([from, to], [dayFrom, dayTo], anchor, factor) {
+  const span = Math.min(dayTo - dayFrom, Math.max(MIN_SPAN, (to - from) * factor));
+  const ratio = to > from ? (anchor - from) / (to - from) : 0.5;
+
+  const start = Math.max(dayFrom, Math.min(dayTo - span, anchor - span * ratio));
+  return [Math.round(start), Math.round(start + span)];
+}
+
+const isZoomed = () => daily.view[0] > daily.day[0] || daily.view[1] < daily.day[1];
+
+function clock(ms, seconds) {
+  const at = new Date(ms);
+  return `${pad(at.getHours())}:${pad(at.getMinutes())}` + (seconds ? `:${pad(at.getSeconds())}` : '');
+}
+
+/** 見えている範囲の言い方。拡大していなければ「1 日全体」。 */
+function rangeLabel(view, day) {
+  if (view[0] <= day[0] && view[1] >= day[1]) return spoitable.t('hrs.panel.history.fullDay');
+
+  const seconds = view[1] - view[0] < 90 * 1000;
+  return `${clock(view[0], seconds)} – ${clock(view[1], seconds)}`;
+}
+
+async function loadDay({ keepView = false } = {}) {
+  const day = dayBounds(el.day.value);
+  const sameDay = day[0] === daily.day[0];
+  const ticket = ++daily.loading;
+
+  let points = [];
+  try {
+    const result = await spoitable.call('readRecords', { from: day[0], to: day[1] });
+    points = Array.isArray(result?.points) ? result.points : [];
+  } catch (err) {
+    console.error('記録を読めなかった', err);
+  }
+
+  // 日を続けて送ったときに、**前に頼んだ日が後から着いて上書きしない**。
+  if (ticket !== daily.loading) return;
+
+  daily.points = points;
+  if (!(keepView && sameDay)) {
+    daily.view = [...day];
+    daily.stack = [];
+  }
+  daily.day = day;
+  daily.drag = null;
+  daily.hover = null;
+
+  paintHistory();
+}
+
+function paintHistory() {
+  const summary = summarize(daily.points, daily.view[0], daily.view[1]);
+
+  el.dayMin.textContent = summary ? summary.min : '—';
+  el.dayAvg.textContent = summary ? summary.avg : '—';
+  el.dayMax.textContent = summary ? summary.max : '—';
+  el.dayRange.textContent = summary ? rangeLabel(daily.view, daily.day) : spoitable.t('hrs.panel.history.noData');
+
+  el.zoomReset.classList.toggle('hidden', !isZoomed());
+  drawHistory();
+}
+
+/** 色はテーマのトークンから。**描くたびに読む**（テーマを替えたら次の描画で追いつく）。 */
+function readColors() {
+  const style = getComputedStyle(document.body);
+  const token = name => style.getPropertyValue(name).trim();
+
+  return {
+    line: token('--tone-rose'),
+    grid: token('--border'),
+    label: token('--faint'),
+    text: token('--muted'),
+    band: token('--accent'),
+    dot: token('--surface'),
+    font: token('--font-ui') || 'sans-serif',
+  };
+}
+
+/** t 以上の最初の添字（points は古い順）。 */
+function firstAtOrAfter(t) {
+  let lo = 0;
+  let hi = daily.points.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (daily.points[mid][0] < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+function niceStep(range, target) {
+  const raw = range / target;
+  const power = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / power;
+  const step = norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10;
+  return Math.max(1, step * power);
+}
+
+const TIME_STEPS = [
+  1000, 2000, 5000, 10000, 15000, 30000,
+  MINUTE, 2 * MINUTE, 5 * MINUTE, 10 * MINUTE, 15 * MINUTE, 30 * MINUTE,
+  HOUR, 2 * HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR,
+];
+
+function niceTimeStep(span, target) {
+  return TIME_STEPS.find(step => span / step <= target) ?? TIME_STEPS[TIME_STEPS.length - 1];
+}
+
+/** 目盛りの字。見えている幅で細かさを変える（時 → 分 → 秒）。 */
+function tickLabel(ms, span) {
+  if (span >= 3 * HOUR) return String(new Date(ms).getHours());
+  return clock(ms, span < 90 * 1000);
+}
+
+function drawHistory() {
+  const canvas = el.graph;
+  const box = canvas.getBoundingClientRect();
+
+  // 隠れているタブでは大きさが 0。見えたら ResizeObserver がもう一度呼ぶ。
+  if (box.width < 2 || box.height < 2) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(box.width * dpr);
+  canvas.height = Math.round(box.height * dpr);
+
+  const ctx = canvas.getContext('2d');
+  const colors = readColors();
+  daily.colors = colors;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const padL = PAD.l * dpr;
+  const padR = PAD.r * dpr;
+  const padT = PAD.t * dpr;
+  const padB = PAD.b * dpr;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+
+  ctx.clearRect(0, 0, w, h);
+
+  const [viewFrom, viewTo] = daily.view;
+  const summary = summarize(daily.points, viewFrom, viewTo);
+
+  if (!summary) {
+    ctx.fillStyle = colors.text;
+    ctx.font = `${13 * dpr}px ${colors.font}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(spoitable.t('hrs.panel.history.noData'), w / 2, h / 2);
+    return;
+  }
+
+  // 縦の幅は**見えている範囲の**上下（拡大すると縦も合わせて伸びる）。
+  const low = Math.floor(summary.min - 5);
+  const high = Math.max(Math.ceil(summary.max + 5), low + 10);
+
+  const span = viewTo - viewFrom || 1;
+  const xOf = t => padL + ((t - viewFrom) / span) * plotW;
+  const yOf = v => padT + (1 - (v - low) / (high - low)) * plotH;
+
+  ctx.lineWidth = 1;
+  ctx.font = `${10 * dpr}px ${colors.font}`;
+
+  // 横の線と bpm の目盛り
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  const yStep = niceStep(high - low, 4);
+  for (let v = Math.ceil(low / yStep) * yStep; v <= high; v += yStep) {
+    const y = yOf(v);
+    ctx.strokeStyle = colors.grid;
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(w - padR, y);
+    ctx.stroke();
+    ctx.fillStyle = colors.label;
+    ctx.fillText(String(v), padL - 5 * dpr, y);
+  }
+
+  // 縦の線と時刻の目盛り。字が詰まるなら間引く。
+  const tStep = niceTimeStep(span, 8);
+  const stepPx = (tStep / span) * (plotW / dpr);
+  const every = stepPx >= 42 ? 1 : stepPx >= 24 ? 2 : 3;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  let index = 0;
+  for (let t = Math.ceil(viewFrom / tStep) * tStep; t <= viewTo; t += tStep, index++) {
+    const x = xOf(t);
+    ctx.strokeStyle = colors.grid;
+    ctx.beginPath();
+    ctx.moveTo(x, padT);
+    ctx.lineTo(x, padT + plotH);
+    ctx.stroke();
+    if (index % every === 0) {
+      ctx.fillStyle = colors.label;
+      ctx.fillText(tickLabel(t, span), x, padT + plotH + 4 * dpr);
+    }
+  }
+
+  // ドラッグ中の帯
+  const drag = daily.drag;
+  if (drag?.moved) {
+    const x0 = xOf(Math.min(drag.from, drag.to));
+    const x1 = xOf(Math.max(drag.from, drag.to));
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = colors.band;
+    ctx.fillRect(x0, padT, Math.max(1, x1 - x0), plotH);
+    ctx.restore();
+    ctx.strokeStyle = colors.band;
+    ctx.beginPath();
+    ctx.moveTo(x0, padT);
+    ctx.lineTo(x0, padT + plotH);
+    ctx.moveTo(x1, padT);
+    ctx.lineTo(x1, padT + plotH);
+    ctx.stroke();
+  }
+
+  // 心拍の線。見えている所だけ（前後 1 件は線が枠から入ってくるように含める）。
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(padL, padT, plotW, plotH);
+  ctx.clip();
+
+  const start = Math.max(0, firstAtOrAfter(viewFrom) - 1);
+  const end = Math.min(daily.points.length, firstAtOrAfter(viewTo + 1) + 1);
+
+  ctx.strokeStyle = colors.line;
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  let open = false;
+  let last = -Infinity;
+  for (let i = start; i < end; i++) {
+    const [t, bpm] = daily.points[i];
+    if (bpm <= 0) { open = false; continue; }   // 計れていない所で切る
+
+    const x = xOf(t);
+    const y = yOf(bpm);
+    if (!open || t - last > GAP) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+    open = true;
+    last = t;
+  }
+  ctx.stroke();
+
+  // 十分に拡大したら 1 件ずつ点も打つ
+  if (isZoomed() && summary.count <= 150) {
+    ctx.fillStyle = colors.line;
+    for (let i = start; i < end; i++) {
+      const [t, bpm] = daily.points[i];
+      if (bpm <= 0 || t < viewFrom || t > viewTo) continue;
+      ctx.beginPath();
+      ctx.arc(xOf(t), yOf(bpm), 2 * dpr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // 乗せている点
+  const hover = daily.hover;
+  if (hover && !daily.drag && hover[0] >= viewFrom && hover[0] <= viewTo) {
+    const hx = xOf(hover[0]);
+    const hy = yOf(hover[1]);
+    ctx.strokeStyle = colors.label;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(hx, padT);
+    ctx.lineTo(hx, padT + plotH);
+    ctx.stroke();
+    ctx.fillStyle = colors.dot;
+    ctx.strokeStyle = colors.line;
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath();
+    ctx.arc(hx, hy, 3 * dpr, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** 画面の x → 時刻（見えている範囲の中に収める）。 */
+function timeAt(clientX) {
+  const box = el.graph.getBoundingClientRect();
+  const width = box.width - PAD.l - PAD.r;
+  const fraction = Math.max(0, Math.min(1, (clientX - box.left - PAD.l) / width));
+  return Math.round(daily.view[0] + fraction * (daily.view[1] - daily.view[0]));
+}
+
+function setView(next, { push = false } = {}) {
+  if (next[0] === daily.view[0] && next[1] === daily.view[1]) return;
+  if (push) daily.stack.push(daily.view);
+
+  daily.view = next;
+  if (!isZoomed()) daily.stack = [];
+  daily.hover = null;
+  hideTip();
+  paintHistory();
+}
+
+function resetZoom() {
+  daily.stack = [];
+  setView([...daily.day]);
+}
+
+/** 1 段戻る。ドラッグの履歴が無ければ（ホイールだけで寄せたなら）全体に戻す。 */
+function zoomOut() {
+  if (daily.stack.length) setView(daily.stack.pop());
+  else resetZoom();
+}
+
+function hideTip() {
+  el.graphTip.classList.add('hidden');
+}
+
+/** 指した時刻にいちばん近い、見えていて計れている 1 件。 */
+function nearest(t) {
+  const at = firstAtOrAfter(t);
+  let best = null;
+  let distance = Infinity;
+
+  for (let i = Math.max(0, at - 3); i < Math.min(daily.points.length, at + 3); i++) {
+    const point = daily.points[i];
+    if (point[1] <= 0 || point[0] < daily.view[0] || point[0] > daily.view[1]) continue;
+    const d = Math.abs(point[0] - t);
+    if (d < distance) { distance = d; best = point; }
+  }
+  return best;
+}
+
+function showHover(event) {
+  if (daily.drag || !daily.points.length) return;
+
+  const point = nearest(timeAt(event.clientX));
+  daily.hover = point;
+  if (!point) {
+    hideTip();
+    drawHistory();
+    return;
+  }
+
+  const box = el.graph.getBoundingClientRect();
+  const x = event.clientX - box.left;
+  const y = event.clientY - box.top;
+
+  el.graphTip.textContent = spoitable.t('hrs.panel.history.tip', clock(point[0], true), point[1]);
+  el.graphTip.classList.remove('hidden');
+
+  const tw = el.graphTip.offsetWidth;
+  const th = el.graphTip.offsetHeight;
+  let left = x + 12;
+  let top = y - th - 10;
+  if (left + tw > box.width) left = x - tw - 12;
+  if (top < 0) top = y + 14;
+  el.graphTip.style.left = `${Math.max(0, left)}px`;
+  el.graphTip.style.top = `${Math.max(0, top)}px`;
+
+  drawHistory();
+}
+
+// デスクトップ: ドラッグで拡大
+el.graph.addEventListener('mousedown', event => {
+  if (event.button !== 0 || !daily.points.length) return;
+
+  const t = timeAt(event.clientX);
+  daily.drag = { from: t, to: t, x: event.clientX, moved: false };
+  daily.hover = null;
+  hideTip();
+  drawHistory();
+});
+
+window.addEventListener('mousemove', event => {
+  const drag = daily.drag;
+  if (!drag) return;
+
+  drag.to = timeAt(event.clientX);
+  if (Math.abs(event.clientX - drag.x) > 3) drag.moved = true;
+  drawHistory();
+});
+
+window.addEventListener('mouseup', () => {
+  const drag = daily.drag;
+  if (!drag) return;
+
+  daily.drag = null;
+  if (drag.moved) setView(clampRange(drag.from, drag.to, daily.day), { push: true });
+  else drawHistory();
+});
+
+el.graph.addEventListener('dblclick', zoomOut);
+
+// 右クリック（VR は長押し）で全体に戻す。⚠ **document まで上げない** — `_host/bridge.js` が
+// document で拾ってシェルのメニューを出すので、止めないとメニューも出る。
+el.graph.addEventListener('contextmenu', event => {
+  event.preventDefault();
+  event.stopPropagation();
+  resetZoom();
+});
+
+// ホイールで指した所を中心に拡大・縮小（VR はレーザーを引いて上下）。**グラフの上ではページを巻かない。**
+el.graph.addEventListener('wheel', event => {
+  event.preventDefault();
+  if (!daily.points.length) return;
+
+  // ドラッグの途中で来たら（VR はドラッグの代わりにホイールが来る）ドラッグは取り消す。
+  daily.drag = null;
+
+  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1;
+  const factor = Math.exp(event.deltaY * unit * 0.0015);
+  setView(zoomAround(daily.view, daily.day, timeAt(event.clientX), factor));
+}, { passive: false });
+
+// 乗せた点。描き直しは 1 コマに 1 回まで。
+let hoverFrame = 0;
+let hoverEvent = null;
+el.graph.addEventListener('mousemove', event => {
+  if (daily.drag) return;
+  hoverEvent = event;
+  if (hoverFrame) return;
+  hoverFrame = requestAnimationFrame(() => {
+    hoverFrame = 0;
+    if (hoverEvent) showHover(hoverEvent);
+  });
+});
+
+el.graph.addEventListener('mouseleave', () => {
+  if (hoverFrame) cancelAnimationFrame(hoverFrame);
+  hoverFrame = 0;
+  daily.hover = null;
+  hideTip();
+  drawHistory();
+});
+
+// 大きさが変わったら（タブが見えた・窓の大きさが変わった）描き直す。
+new ResizeObserver(() => drawHistory()).observe(el.graphWrap);
+
+// テーマを替えると bridge.js が theme.css を引き直す。**読み終わってから**描き直す
+// （push の直後に読むとまだ前の色が返る）。
+document.querySelector('link[href^="/_host/theme.css"]')?.addEventListener('load', () => drawHistory());
+
+function shiftDay(delta) {
+  const [from] = dayBounds(el.day.value);
+  const base = new Date(from);
+  base.setDate(base.getDate() + delta);
+  setDay(base);
+}
+
+/** 日を替える。**元の欄に書いて change を出す**（被せた暦の表示も追いつく）。 */
+function setDay(date) {
+  el.day.value = dayValue(date);
+  el.day.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+el.day.addEventListener('change', () => loadDay());
+el.dayPrev.addEventListener('click', () => shiftDay(-1));
+el.dayNext.addEventListener('click', () => shiftDay(1));
+el.dayToday.addEventListener('click', () => setDay(new Date()));
+el.zoomReset.addEventListener('click', resetZoom);
+
+// 試験から見る口。描いた絵の画素は読まず、数え方と最後に使った色を見る。
+window.__stats = {
+  summarize, clampRange, zoomAround, dayBounds, rangeLabel,
+  get state() {
+    return { day: daily.day, view: daily.view, count: daily.points.length, colors: daily.colors, tab: activeTab };
+  },
+};
+
+el.toggle.addEventListener('click', () => {
+  const method = el.toggle.dataset.method || 'disconnect';
+  el.toggle.disabled = true;
+
+  spoitable.call(method).finally(() => { el.toggle.disabled = false; });
+});
+
+el.export.addEventListener('click', () => {
+  el.export.disabled = true;
+
+  // 「グラフで見ている範囲」: 拡大していなければ選んだ日、拡大していればその範囲。
+  // **日を替えてまだ読み込んでいる間は、選んだ日の方を出す** — view は読み終えるまで前の日のままなので、
+  // そのまま使うと画面の日付と違う日が出る（8.6 万件の日は読み込みが遅い）。
+  const chosen = dayBounds(el.day.value);
+  const view = daily.view[1] > 0 && daily.day[0] === chosen[0] ? daily.view : chosen;
+  const payload = el.range.value === 'view'
+    ? { from: view[0], to: view[1] }
+    : { hours: Number(el.range.value) | 0 };
+
+  // 何時間ぶんも出すと数秒かかる。結果（出した先）は push で返ってくる。
+  spoitable.call('exportCsv', payload)
+    .finally(() => { el.export.disabled = false; });
+});
+
+el.addRule.addEventListener('click', () => {
+  el.addRule.disabled = true;
+
+  // 結果は push で返ってくる（管理者の確認を待つので、その場では分からない）。
+  spoitable.call('addFirewallRule').finally(() => { el.addRule.disabled = false; });
+});
+
+spoitable.onPush((channel, payload) => {
+  if (channel === 'status') render(payload);
+});
+
+// ネイティブの `<select>` と暦は VR の面に乗らない（別レイヤーで飛んでくる）ので、
+// ページの中に描くものへ被せる。**元の欄は隠して残る**ので、`el.range.value`・`el.day.value` はそのまま読める。
+// 日の欄は被せる前に今日を入れておく（被せた表示は作ったときの値を出す）。
+el.day.value = dayValue(new Date());
+window.spoitablePick?.upgradeAll();
+window.spoitableWhen?.upgradeAll();
+
+// call の戻り値はシェルが JSON.parse 済み（push の payload と同じ形で受け取れる）。
+spoitable.whenReady
+  .then(() => {
+    window.spoitableWhen?.setLabels({
+      now: spoitable.t('host.when.now'), today: spoitable.t('host.when.today'), clear: spoitable.t('host.when.clear'),
+    });
+    return spoitable.call('getStatus');
+  })
+  .then(render)
+  .catch(err => { el.device.textContent = String((err && err.message) || err); });
+
+// 動作確認用。ブリッジまで通ったことの目印。
+window.__panelReady = true;
+</script>
+
+</body>
+</html>

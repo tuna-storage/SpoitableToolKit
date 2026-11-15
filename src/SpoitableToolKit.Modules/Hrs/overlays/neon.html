@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Heart Rate — Neon</title><style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:transparent;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:'Segoe UI',system-ui,sans-serif}
+@keyframes heartbeat{0%,100%{transform:scale(1)}15%{transform:scale(1.15)}30%{transform:scale(.95)}45%{transform:scale(1.08)}}
+.ring{width:384px;height:384px;position:relative}
+.ring svg{position:absolute}
+.center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.heart{font-size:36px;color:#3a86ff;animation:heartbeat var(--beat,.85s) ease-in-out infinite}
+.bpm{font-size:96px;font-weight:700;color:#eee;line-height:1;margin-top:4px;text-shadow:0 0 30px rgba(58,134,255,.3);font-variant-numeric:tabular-nums}
+.label{font-size:22px;color:#3a86ff;letter-spacing:.15em;margin-top:8px}
+body.off .heart{animation:none;opacity:.35}
+body.off .bpm{color:#888;text-shadow:none}
+</style></head><body>
+<div class="ring">
+  <svg width="384" height="384" viewBox="0 0 384 384">
+    <circle cx="192" cy="192" r="166" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="6"/>
+    <circle id="arc" cx="192" cy="192" r="166" fill="none" stroke="#3a86ff" stroke-width="7" stroke-dasharray="0 1043.0" stroke-linecap="round" transform="rotate(-90 192 192)" style="filter:drop-shadow(0 0 10px rgba(58,134,255,.5));transition:stroke-dasharray .5s"/>
+  </svg>
+  <div class="center">
+    <span class="heart">&#9829;</span>
+    <span class="bpm" id="bpm">--</span>
+    <span class="label">BPM</span>
+  </div>
+</div>
+<script>
+const circ = 2 * Math.PI * 166;
+const p = new URLSearchParams(location.search), port = p.get('port') || location.port || '9100';
+const bpmEl = document.getElementById('bpm'), arc = document.getElementById('arc');
+
+function idle() {
+  document.body.classList.add('off');
+  bpmEl.textContent = '--';
+  arc.setAttribute('stroke-dasharray', `0 ${circ}`);
+}
+
+function apply(d) {
+  if (d.connected === false) { idle(); return; }
+  document.body.classList.remove('off');
+  if (d.bpm !== undefined && d.bpm > 0) {
+    bpmEl.textContent = d.bpm;
+    document.documentElement.style.setProperty('--beat', (60 / d.bpm).toFixed(2) + 's');
+    // 弧は 180bpm を一周とする。
+    arc.setAttribute('stroke-dasharray', `${Math.min(d.bpm / 180, 1) * circ} ${circ}`);
+  }
+}
+
+let ws;
+function connect() {
+  ws = new WebSocket(`ws://${location.hostname || 'localhost'}:${port}/ws`);
+  ws.onmessage = e => apply(JSON.parse(e.data));
+  ws.onclose = () => { idle(); setTimeout(connect, 2000); };
+}
+connect();
+</script></body></html>

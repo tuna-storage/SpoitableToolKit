@@ -1,0 +1,182 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>SpoitableToolKit.Host</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- CefSharp は RID 固定が必須（ネイティブの libcef を持ってくるため）。 -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <PlatformTarget>x64</PlatformTarget>
+    <!-- nightly の版（CI が -p:AppVersion=… で渡す）。-p:Version にしないのは、SDK のパッケージ（sdk/ に同梱）の版まで変わり、
+         版を数字で書いたモジュールが restore できなくなるため。変わるのはアプリの版だけ。 -->
+    <Version Condition="'$(AppVersion)' != ''">$(AppVersion)</Version>
+    <!-- 元は Assets/app-icon.svg。作り直しは tools/app-icon/make-icon.ps1。 -->
+    <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CefSharp.OffScreen.NETCore" Version="151.3.170" />
+    <PackageReference Include="CefSharp.WinForms.NETCore" Version="151.3.170" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.*" />
+    <PackageReference Include="Velopack" Version="1.2.161" />
+    <PackageReference Include="VolcanicArts.Libs.OpenVR" Version="2.5.1" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SpoitableToolKit.Abstractions\SpoitableToolKit.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Core の中身（パーサ・レジストリ・ローダ）は internal のまま試験する。
+         テストのために public にすると、モジュール API の輪郭がぼやける。 -->
+    <InternalsVisibleTo Include="SpoitableToolKit.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- UI は spoitable://ui/ で配信する。file:// だと fetch や module が塞がるため。 -->
+    <None Update="web\**\*" CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- 画面の文言。locales/<言語>.json をホストが読む。 -->
+    <None Update="locales\**\*" CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- SteamVR Input の action manifest と既定の割り当て。**絶対パスで SteamVR に渡す**（OpenVrOverlays.StartInput）。 -->
+    <None Update="vr\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    CefSharp・CEF・.NET の原文はパッケージの中にしか無い（出力にコピーされない）ので、パッケージから引く。
+    CEF のパッケージの場所は、その props が作る CefRuntimeWin64Locales から辿る（win-x64 のパッケージの props は読まれていない。
+    LICENSE.txt は meta パッケージのものと同じ中身）。
+  -->
+  <ItemGroup>
+    <PackageReference Update="CefSharp.WinForms.NETCore" GeneratePathProperty="true" />
+    <PackageReference Update="Microsoft.Extensions.Logging" GeneratePathProperty="true" />
+  </ItemGroup>
+  <ItemGroup>
+    <SpoitableLicenseFile Include="..\..\LICENSE" Link="LICENSE" />
+    <SpoitableLicenseFile Include="..\..\THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" />
+    <SpoitableLicenseFile Include="$(PkgCefSharp_WinForms_NETCore)\LICENSE" Link="licenses\CefSharp\LICENSE" />
+    <SpoitableLicenseFile Include="@(CefRuntimeWin64Locales->'%(RootDir)%(Directory)..\..\..\LICENSE.txt'->Distinct())" Link="licenses\CEF\LICENSE.txt" />
+    <SpoitableLicenseFile Include="$(PkgMicrosoft_Extensions_Logging)\THIRD-PARTY-NOTICES.TXT" Link="licenses\dotnet\THIRD-PARTY-NOTICES.TXT" />
+    <None Include="@(SpoitableLicenseFile)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="SpoitableCheckLicenseFiles" BeforeTargets="AssignTargetPaths">
+    <Error Condition="'@(SpoitableLicenseFile->WithMetadataValue('Link', 'licenses\CEF\LICENSE.txt'))' == ''"
+           Text="CEF の LICENSE.txt の場所が分からない（chromiumembeddedframework.runtime の props の CefRuntimeWin64Locales が無い）。パッケージの形が変わったら、この csproj の SpoitableLicenseFile を直すこと。" />
+    <Error Condition="!Exists('%(SpoitableLicenseFile.FullPath)')"
+           Text="ライセンスのファイルが無い: %(SpoitableLicenseFile.FullPath)（出力の %(SpoitableLicenseFile.Link)）。docs/third-party-notices.md を見て直すこと。" />
+  </Target>
+
+  <ItemGroup>
+    <!-- 同梱テーマ。**ファイルとして配らず dll に埋める** — 配信する実体は
+         データディレクトリの themes/ 側で、こちらはその置き直しと落ちどころのための正。
+         出力に置くと、どちらが正なのか分からない置き場が 2 つになる。 -->
+    <EmbeddedResource Include="themes/*/theme.css" />
+
+    <!-- 窓のアイコン（AppIcon）。WinForms の窓は exe のアイコンを使わず既定の絵を出すので、同じ .ico を dll にも埋める。 -->
+    <EmbeddedResource Include="Assets\app-icon.ico" LogicalName="SpoitableToolKit.Host.app-icon.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 同梱モジュール。ProjectReference にはしない (参照すると型が既定コンテキストに載ってしまい、
+         モジュールとして読み込む意味が無くなる)。ビルドとコピーだけ下の target で行う。 -->
+    <BundledModule Include="..\SpoitableToolKit.Modules\*\*.csproj" />
+  </ItemGroup>
+
+  <!--
+    同梱モジュールを出力の modules/<Id>/ へ配る。実行時のディレクトリ構成そのままで動かすため。
+
+    配るだけでなく **取り残しを消す**。コピーするだけだと、モジュールをリネーム/削除しても
+    出力に古いディレクトリとファイルが残り、開発中に黙って古いモジュールが動く。
+
+    入り口の dll は *.deps.json から決めるので (ModuleDiscovery.FindEntryAssembly)、
+    古い名前の deps.json が並んでいるだけで本物が読めなくなる。
+  -->
+  <Target Name="DeployBundledModules" AfterTargets="Build" Condition="'@(BundledModule)' != '' and '$(OutDir)' != ''">
+    <!-- RemoveProperties: publish の -r・self-contained をモジュールへ継がせない（継ぐと RID 付きの別の出力に build され、restore の無い RID で落ちる）。 -->
+    <MSBuild Projects="@(BundledModule)" Targets="GetModuleDeployInfo" Properties="Configuration=$(Configuration);Platform=$(Platform)"
+             RemoveProperties="RuntimeIdentifier;SelfContained">
+      <Output TaskParameter="TargetOutputs" ItemName="ModuleDeployInfo" />
+    </MSBuild>
+
+    <PropertyGroup>
+      <!-- 消してよい範囲はここから下だけ。 -->
+      <_ModulesRoot>$([System.IO.Path]::GetFullPath('$(OutDir)modules'))</_ModulesRoot>
+    </PropertyGroup>
+
+    <!-- (1) 知らないモジュールのディレクトリを丸ごと消す。名前 (= Id) で突き合わせるので、
+         パスの形 (相対/絶対・区切り) に左右されない。 -->
+    <ItemGroup Condition="Exists('$(_ModulesRoot)')">
+      <_ExistingModuleDir Include="$([System.IO.Directory]::GetDirectories('$(_ModulesRoot)'))" />
+      <_ExpectedModuleName Include="@(ModuleDeployInfo->'%(ModuleId)')" />
+      <_ExistingModuleName Include="@(_ExistingModuleDir->'%(Filename)%(Extension)')" />
+      <_StaleModuleName Include="@(_ExistingModuleName)" Exclude="@(_ExpectedModuleName)" />
+      <_StaleModuleDir Include="@(_StaleModuleName->'$(_ModulesRoot)\%(Identity)')" />
+    </ItemGroup>
+
+    <Message Importance="high" Condition="'@(_StaleModuleDir)' != ''" Text="modules: 取り残しのディレクトリを消す -&gt; @(_StaleModuleName, ', ')" />
+    <RemoveDir Directories="@(_StaleModuleDir)" />
+
+    <ItemGroup>
+      <ModuleDeployFile Include="%(ModuleDeployInfo.ModuleOutputDirectory)**\*.*">
+        <ModuleId>%(ModuleDeployInfo.ModuleId)</ModuleId>
+      </ModuleDeployFile>
+      <_ExpectedModuleFile Include="@(ModuleDeployFile-&gt;'$(OutDir)modules\%(ModuleId)\%(RecursiveDir)%(Filename)%(Extension)'-&gt;'%(FullPath)')" />
+    </ItemGroup>
+
+    <!-- (2) 残ったディレクトリの中の、もう配られないファイルを消す。
+         ディレクトリを消したあとに数える (上の ItemGroup が先に走っている)。
+         拡張子なしも拾いたいので **\* で舐める。 -->
+    <ItemGroup Condition="Exists('$(_ModulesRoot)')">
+      <_ExistingModuleFile Include="$(OutDir)modules\**\*" />
+      <_StaleModuleFile Include="@(_ExistingModuleFile->'%(FullPath)')" Exclude="@(_ExpectedModuleFile)" />
+
+      <!-- .disabled は手で置く無効化マーカー (ModuleDiscovery.IsDisabled)。
+           出力に無いのが正しいファイルだが、消すと開発中に無効化できなくなるので残す。 -->
+      <_StaleModuleFile Remove="@(_StaleModuleFile)" Condition="'%(Filename)%(Extension)' == '.disabled'" />
+    </ItemGroup>
+
+    <Message Importance="high" Condition="'@(_StaleModuleFile)' != ''" Text="modules: 取り残しのファイルを消す -&gt; @(_StaleModuleFile->'%(RecursiveDir)%(Filename)%(Extension)', ', ')" />
+    <Delete Files="@(_StaleModuleFile)" />
+
+    <Copy SourceFiles="@(ModuleDeployFile)" DestinationFiles="@(ModuleDeployFile->'$(OutDir)modules\%(ModuleId)\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+  <!--
+    モジュールの SDK のパッケージ（SpoitableToolKit.Sdk.<版>.nupkg）を、出力の sdk/ に置く。**アプリに同梱する入れ元**:
+    利用者の PC でモジュールをソースから build するとき、SDK はここからしか取らせない
+    （その名前は nuget.org では誰でも取れる。ModuleSourceBuild.NuGetConfig）。版はこのアプリのものと必ず合う。
+    API の project はもう build されている（参照している）ので、ここでは詰めるだけ。前の版のパッケージが残らないように、先に消す。
+    RemoveProperties: この project に渡された -f・-r を API の project へ継がせない（継ぐと、build していない別の出力を詰めに行く）。
+  -->
+  <Target Name="BundleSdkPackage" AfterTargets="Build" Condition="'$(OutDir)' != ''">
+    <RemoveDir Directories="$(OutDir)sdk" />
+    <MSBuild Projects="..\SpoitableToolKit.Abstractions\SpoitableToolKit.Abstractions.csproj" Targets="Pack"
+             Properties="NoBuild=true;PackageOutputPath=$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(OutDir)', 'sdk'))"
+             RemoveProperties="TargetFramework;RuntimeIdentifier;SelfContained" />
+  </Target>
+
+  <!--
+    modules/ と sdk/ は上の target が build の出力へ作った物で、publish が写す項目には入っていない。
+    先に publish 先の分を消す（前の publish の取り残しで、古いモジュールが動かないように）。
+    .disabled（手で置く無効化の印）は配らない。
+  -->
+  <Target Name="PublishBundledFiles" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <ItemGroup>
+      <_PublishModuleFile Include="$(OutDir)modules\**\*" Exclude="$(OutDir)modules\**\.disabled" />
+      <_PublishSdkFile Include="$(OutDir)sdk\**\*" />
+    </ItemGroup>
+    <RemoveDir Directories="$(PublishDir)modules;$(PublishDir)sdk" />
+    <Copy SourceFiles="@(_PublishModuleFile)" DestinationFiles="@(_PublishModuleFile->'$(PublishDir)modules\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(_PublishSdkFile)" DestinationFiles="@(_PublishSdkFile->'$(PublishDir)sdk\%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+
+</Project>

@@ -1,0 +1,103 @@
+# ⚠ このファイルの名前を変えない。run_number は workflow ごとの通し番号で、名前を変えると 1 に戻り、
+#   同じ日の版の順が崩れる。
+#
+# job を分けるのは権限を分けるため（release.yml と同じ）。
+name: Nightly
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  build:
+    if: github.repository == 'tuna-storage/SpoitableToolKit'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # リリースノートに、この push で入った commit を並べるため。
+          fetch-depth: 0
+
+      - name: The version, and what changed in it
+        id: version
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SHA: ${{ github.sha }}
+          BEFORE: ${{ github.event.before }}
+        # 版の日付は build した日なので、build をやり直すと古い commit が新しい日付の版になり、
+        # 先に出た新しい nightly より上に並んでしまう。やり直さずに、もう一度 push する。
+        run: |
+          if ($env:RUN_ATTEMPT -ne '1') { Write-Error "nightly の build はやり直せません。もう一度 main に push してください"; exit 1 }
+          $version = ./.github/scripts/nightly-version.ps1 -RunNumber $env:RUN_NUMBER -Sha $env:SHA
+          ./.github/scripts/release-notes.ps1 -From $env:BEFORE -To $env:SHA -Out artifacts/notes.md
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Tools
+        run: |
+          dotnet tool restore
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Build
+        run: |
+          dotnet build SpoitableToolKit.slnx -c Release -nologo
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ./.github/scripts/pack.ps1 -Version $env:VERSION -Channel nightly -Notes artifacts/notes.md -Out artifacts/packages
+          Copy-Item artifacts/notes.md artifacts/packages/notes.md
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packages
+          path: artifacts/packages/
+          if-no-files-found: error
+          retention-days: 3
+
+  release:
+    needs: build
+    if: github.repository == 'tuna-storage/SpoitableToolKit'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: packages
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+          SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+        # tag は v で始めない（v* は stable の workflow の契機）。prerelease は「最新の Release」にならないので、
+        # stable のアプリには出ない。nightly のアプリは prerelease を含めた新しい順の 10 件から探す。
+        run: |
+          $tag = "nightly-v$env:VERSION"
+          $files = @(Get-ChildItem packages -File | Where-Object Name -ne 'notes.md' | ForEach-Object FullName)
+          gh release create $tag @files --repo $env:REPOSITORY --target $env:SHA --draft --prerelease --latest=false --title "SpoitableToolKit $env:VERSION (nightly)" --notes-file packages/notes.md
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          gh release edit $tag --repo $env:REPOSITORY --draft=false
+          if ($LASTEXITCODE -ne 0) { exit 1 }

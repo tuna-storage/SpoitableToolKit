@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ライブラリの見本: モジュールの入口（ISpoitableModule）を持たず、共有の dll だけを配るもの。
+    zip は module.json と shared/Clock.Library.dll になる。
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>2.1.0</Version>
+    <SpoitableProjectKind>Library</SpoitableProjectKind>
+    <SpoitableModuleId>clock-lib</SpoitableModuleId>
+    <SpoitableModuleName>Clock library</SpoitableModuleName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 本物の project は、ここに版を数字で書く。試験は、いま作ったパッケージの版を置き場の Directory.Build.props から渡す。 -->
+    <PackageReference Include="SpoitableToolKit.Sdk" Version="$(SpoitableSdkVersionUnderTest)" />
+  </ItemGroup>
+
+</Project>

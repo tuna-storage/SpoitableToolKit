@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Heart Rate — Pill</title><style>
+/* OBS のブラウザソースに貼る前提。背景は透明のまま。 */
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:transparent;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:'Segoe UI',system-ui,sans-serif}
+@keyframes heartbeat{0%,100%{transform:scale(1)}15%{transform:scale(1.15)}30%{transform:scale(.95)}45%{transform:scale(1.08)}}
+.pill{display:inline-flex;align-items:center;gap:20px;padding:20px 40px 20px 32px;background:rgba(26,26,46,.9);border-radius:56px;border:1px solid rgba(255,255,255,.1);backdrop-filter:blur(12px)}
+/* 拍の速さは実際の心拍に合わせる (--beat)。 */
+.heart{font-size:44px;color:#e74c6f;animation:heartbeat var(--beat,.85s) ease-in-out infinite}
+.bpm{font-size:52px;font-weight:700;color:#eee;font-variant-numeric:tabular-nums}
+.label{font-size:24px;color:#3a86ff;letter-spacing:.05em}
+/* 繋がっていないときは止める。動き続けると、外れたベルトの最後の心拍が生きて見える。 */
+body.off .heart{animation:none;opacity:.35}
+body.off .bpm{color:#888}
+</style></head><body>
+<div class="pill">
+  <span class="heart">&#9829;</span>
+  <span class="bpm" id="bpm">--</span>
+  <span class="label">BPM</span>
+</div>
+<script>
+const p = new URLSearchParams(location.search), port = p.get('port') || location.port || '9100';
+const bpmEl = document.getElementById('bpm');
+
+function apply(d) {
+  // connected を見る。bpm だけ見ると、心拍が止まっても最後の数字が残り続ける。
+  if (d.connected === false) { document.body.classList.add('off'); bpmEl.textContent = '--'; return; }
+  document.body.classList.remove('off');
+  if (d.bpm !== undefined && d.bpm > 0) {
+    bpmEl.textContent = d.bpm;
+    document.documentElement.style.setProperty('--beat', (60 / d.bpm).toFixed(2) + 's');
+  }
+}
+
+let ws;
+function connect() {
+  ws = new WebSocket(`ws://${location.hostname || 'localhost'}:${port}/ws`);
+  ws.onmessage = e => apply(JSON.parse(e.data));
+  // 配信側を開き直しても貼り直さずに済むように、閉じたら繋ぎ直す。
+  ws.onclose = () => { document.body.classList.add('off'); bpmEl.textContent = '--'; setTimeout(connect, 2000); };
+}
+connect();
+</script></body></html>

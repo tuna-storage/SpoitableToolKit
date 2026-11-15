@@ -1,0 +1,9 @@
+<Project>
+
+  <!-- ここに Directory.Build.props を置くと、repo 直下のものは自動では読まれなくなる。先に読み込む。 -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <!-- 同梱のモジュールも、外の repo のモジュールと同じ決まりで作る（パッケージの代わりに、同じファイルを読む）。 -->
+  <Import Project="$(MSBuildThisFileDirectory)..\SpoitableToolKit.Sdk\InRepo.props" />
+
+</Project>

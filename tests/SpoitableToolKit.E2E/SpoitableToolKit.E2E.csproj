@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>SpoitableToolKit.E2E</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 記録を偽で積むためだけ。**製品の型は 1 つも参照しない**方針は変えていない
+         （スキーマもアプリが作ったものへ INSERT するだけで、写していない）。 -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.*" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="Microsoft.Playwright" Version="1.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 本物の exe を起動して外から触るので、参照はしない（型は 1 つも要らない）。
+         ビルド順のためだけに並べる。 -->
+    <ProjectReference Include="..\..\src\SpoitableToolKit.Host\SpoitableToolKit.Host.csproj"
+                      ReferenceOutputAssembly="false" Private="false" />
+
+    <!-- 外から入れる試験に使う、本物の小さいモジュール。これもビルド順のためだけ（試験が出力を zip にして、手元の偽の GitHub に置く）。 -->
+    <ProjectReference Include="..\fixtures\SampleModule\SampleModule.csproj"
+                      ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 起動する exe の場所。出力を持ってくると modules/ や web/ が付いてこないので、
+         Host の出力ディレクトリをそのまま指す。 -->
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>HostExecutable</_Parameter1>
+      <_Parameter2>$(MSBuildThisFileDirectory)..\..\src\SpoitableToolKit.Host\bin\$(Configuration)\net10.0-windows\win-x64\SpoitableToolKit.Host.exe</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>SampleModuleOutput</_Parameter1>
+      <_Parameter2>$(MSBuildThisFileDirectory)..\fixtures\SampleModule\bin\$(Configuration)\net10.0\</_Parameter2>
+    </AssemblyAttribute>
+    <!-- ソースから build する試験に使う、見本のモジュールのソース（ここでは build しない。試験が zip にして、手元の偽の GitHub に置く）。 -->
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>SdkSamples</_Parameter1>
+      <_Parameter2>$(MSBuildThisFileDirectory)..\fixtures\sdk-samples\</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- アプリは試験のクラスごとに 1 つ（AppFixture）。同時に動かすのは maxParallelThreads 本まで。
+         conservative は「同時に走らせる数 = maxParallelThreads」を守る（aggressive だと await の間に次を始めて、
+         アプリが何本も同時に立つ）。機械に合わせて、dotnet test の後ろに RunSettings の引数
+         xUnit.MaxParallelThreads=2 を渡して変えられる（AppFixture の説明に書き方）。 -->
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

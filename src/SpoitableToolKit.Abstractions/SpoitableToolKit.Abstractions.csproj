@@ -1,0 +1,156 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- モジュール API は Windows 非依存に保ち、パッケージの依存は Microsoft.Extensions.Logging.Abstractions だけにする（下）。
+         AssemblyLoadContext でホスト側の 1 インスタンスを共有させるため。 -->
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <!--
+    モジュールを作る側が参照するパッケージ SpoitableToolKit.Sdk は、この project から作る（dotnet pack）。
+    中身は API の dll（コンパイル用）と、build の決まり（../SpoitableToolKit.Sdk/build/ の props / targets）。
+    nuget.org には出していない。手元の feed に置いて使う。
+  -->
+  <PropertyGroup>
+    <PackageId>SpoitableToolKit.Sdk</PackageId>
+    <Authors>SpoitableToolKit</Authors>
+    <Description>API and build rules for SpoitableToolKit modules. Reference it from a module project and set SpoitableModuleId and SpoitableModuleName.</Description>
+
+    <!-- **dll は ref/ にだけ入れる**（lib/ には入れない）。ref/ の dll はコンパイルにしか使われないので、モジュールの出力には来ない。
+         来ると、本体が読み込んだ API の dll と型が二重になる。参照する側の書き方（ExcludeAssets など）に頼らない。 -->
+    <BuildOutputTargetFolder>ref</BuildOutputTargetFolder>
+
+    <!-- API の説明（XML）も入れる。モジュールを書く側（AI）が、型の意味と決まりをここから読む。
+         CS1591: 説明の無い public。説明は要る所に書いてあり、全部には付けていない。 -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+
+    <!-- NU5128・NU5131: lib/ が無い・nuspec に ref の一覧が無い、という注意。どちらもわざと（上の説明）。 -->
+    <NoWarn>$(NoWarn);NU5128;NU5131</NoWarn>
+  </PropertyGroup>
+
+  <!--
+    IModuleHost.Logger の ILogger（Microsoft.Extensions.Logging.Abstractions、MIT）。**本体と同じ 10.0.0 の dll を、パッケージの ref/ に一緒に入れる**
+    （API の dll と同じく、コンパイルにだけ使われ、モジュールの出力にも deps.json の実行時の一覧にも来ない）。
+    パッケージの依存（nuspec の dependency）にはしない: モジュールの restore は本体の SDK の feed しか見ないので、依存にすると取りに行けずに落ちる。
+    実行時は本体が読み込んだ dll を使うので、ILogger の型が本体とモジュールで二重にならない（版 10.x の dll はどれも 10.0.0.0）。
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" PrivateAssets="all" GeneratePathProperty="true" />
+    <None Include="$(PkgMicrosoft_Extensions_Logging_Abstractions)\lib\net10.0\Microsoft.Extensions.Logging.Abstractions.dll" Pack="true" PackagePath="ref\net10.0\" Visible="false" />
+    <None Include="$(PkgMicrosoft_Extensions_Logging_Abstractions)\lib\net10.0\Microsoft.Extensions.Logging.Abstractions.xml" Pack="true" PackagePath="ref\net10.0\" Visible="false" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 fltuna</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="..\SpoitableToolKit.Sdk\THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(PkgMicrosoft_Extensions_Logging_Abstractions)\THIRD-PARTY-NOTICES.TXT" Pack="true" PackagePath="licenses\Microsoft.Extensions.Logging.Abstractions\" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\SpoitableToolKit.Sdk\build\SpoitableToolKit.Sdk.props" Pack="true" PackagePath="build\" Visible="false" />
+    <None Include="..\SpoitableToolKit.Sdk\build\SpoitableToolKit.Sdk.targets" Pack="true" PackagePath="build\" Visible="false" />
+    <!-- TargetFrameworks（複数形）の project の外側の build が読むもの。zip の target を、直し方を言って止める形で置く。 -->
+    <None Include="..\SpoitableToolKit.Sdk\buildMultiTargeting\SpoitableToolKit.Sdk.targets" Pack="true" PackagePath="buildMultiTargeting\" Visible="false" />
+  </ItemGroup>
+
+  <!--
+    モジュールのコードを読むアナライザー（STK040〜。../SpoitableToolKit.Sdk.Analyzers）。パッケージの analyzers/dotnet/cs/ に入れる
+    （参照したモジュールの build で、コンパイラが読む）。**この project の dll とは別物**で、参照はビルドの順のためだけ:
+    ReferenceOutputAssembly="false"（API の dll はアナライザーを参照しない）・PrivateAssets="all"（パッケージの依存にしない — 依存にすると、モジュールの restore が探しに行く）。
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\SpoitableToolKit.Sdk.Analyzers\SpoitableToolKit.Sdk.Analyzers.csproj"
+                      ReferenceOutputAssembly="false" PrivateAssets="all" />
+  </ItemGroup>
+
+  <Target Name="SpoitablePackAnalyzers" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\SpoitableToolKit.Sdk.Analyzers\SpoitableToolKit.Sdk.Analyzers.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="_SpoitableAnalyzerAssembly" />
+    </MSBuild>
+
+    <Error Condition="!Exists('@(_SpoitableAnalyzerAssembly)')"
+           Text="SDK のアナライザー（@(_SpoitableAnalyzerAssembly)）がまだ出来ていない。pack の前に build すること（--no-build なら、先に dotnet build）。" />
+
+    <ItemGroup>
+      <None Include="@(_SpoitableAnalyzerAssembly)" Pack="true" PackagePath="analyzers\dotnet\cs\" Visible="false" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    **SDK の形を壊していないかを、pack のたびに見る**（.NET の package validation = APICompat。アプリの build でも毎回 pack している —
+    Host の BundleSdkPackage — ので、壊すとアプリの build が落ちる）。比べる相手は ../SpoitableToolKit.Sdk/baseline/ に置いた、
+    本体が読めるいちばん古い SDK（ModuleManifest.MinimumSdk）のパッケージ。
+    MinimumSdk を上げるのは SDK の形を壊したときだけ。何が通って何が落ちるかと、わざと壊すときの手順は baseline/README.md。
+    版と baseline の食い違いは試験（SdkBaselineTests）が見る。
+    CompatibilitySuppressions.xml が抑えるのは PKV004 だけ（ref/ だけで lib/ を持たない — わざと）。壊した所（CP…）は抑えない（同じ試験が見る）。
+  -->
+  <PropertyGroup>
+    <SpoitableSdkBaselineDirectory>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', 'SpoitableToolKit.Sdk', 'baseline'))</SpoitableSdkBaselineDirectory>
+    <EnablePackageValidation Condition="'$(SpoitableRefreshSdkBaseline)' != 'true'">true</EnablePackageValidation>
+    <RunPackageValidationDependsOn>SpoitableUseSdkBaseline;$(RunPackageValidationDependsOn)</RunPackageValidationDependsOn>
+  </PropertyGroup>
+
+  <Target Name="SpoitableUseSdkBaseline">
+    <ItemGroup>
+      <_SpoitableSdkBaseline Include="$(SpoitableSdkBaselineDirectory)*.nupkg" />
+    </ItemGroup>
+
+    <Error Condition="'@(_SpoitableSdkBaseline->Count())' != '1'"
+           Text="SDK の比べる相手（$(SpoitableSdkBaselineDirectory)）には、本体が読めるいちばん古い SDK のパッケージがちょうど 1 つ要る（いま @(_SpoitableSdkBaseline->Count()) 個）。手順は baseline/README.md。" />
+
+    <PropertyGroup>
+      <PackageValidationBaselinePath>@(_SpoitableSdkBaseline->'%(FullPath)')</PackageValidationBaselinePath>
+    </PropertyGroup>
+
+    <!-- 比べる相手を替えたら、パッケージが同じでも比べ直す（package validation は自分の入力が変わったときしか走らない）。 -->
+    <ItemGroup>
+      <NuGetPackInput Include="@(_SpoitableSdkBaseline)" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    比べる相手を作り直す: dotnet pack src/SpoitableToolKit.Abstractions -c Release -p:SpoitableRefreshSdkBaseline=true
+    （このときだけ比べない。いまの SDK を詰めて、baseline/ の古いものと入れ替える。）
+  -->
+  <Target Name="SpoitableRefreshSdkBaseline" AfterTargets="Pack" Condition="'$(SpoitableRefreshSdkBaseline)' == 'true'">
+    <ItemGroup>
+      <_SpoitableOldSdkBaseline Include="$(SpoitableSdkBaselineDirectory)*.nupkg" />
+    </ItemGroup>
+
+    <Delete Files="@(_SpoitableOldSdkBaseline)" />
+    <Copy SourceFiles="$(PackageOutputAbsolutePath)$(PackageId).$(PackageVersion).nupkg" DestinationFolder="$(SpoitableSdkBaselineDirectory)" />
+    <Message Importance="high" Text="SDK の比べる相手を $(PackageId).$(PackageVersion).nupkg にした（ModuleManifest.MinimumSdk も $(PackageVersion) にすること）" />
+  </Target>
+
+  <!--
+    SDK の版を焼いたファイルを、パッケージの build/ に足す。build の決まりはこれを読んで、module.json の "sdk" に書く。
+    （repo の中のモジュールはパッケージを通らないので、../SpoitableToolKit.Sdk/InRepo.props が同じ値を入れる。）
+  -->
+  <Target Name="SpoitableWriteSdkVersion" BeforeTargets="_GetPackageFiles">
+    <PropertyGroup>
+      <_SpoitableSdkVersionFile>$(IntermediateOutputPath)SpoitableToolKit.Sdk.Version.props</_SpoitableSdkVersionFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <_SpoitableSdkVersionLine Include="&lt;Project&gt;" />
+      <_SpoitableSdkVersionLine Include="&lt;PropertyGroup&gt;" />
+      <_SpoitableSdkVersionLine Include="&lt;SpoitableSdkVersion&gt;$(PackageVersion)&lt;/SpoitableSdkVersion&gt;" />
+      <_SpoitableSdkVersionLine Include="&lt;/PropertyGroup&gt;" />
+      <_SpoitableSdkVersionLine Include="&lt;/Project&gt;" />
+    </ItemGroup>
+
+    <WriteLinesToFile File="$(_SpoitableSdkVersionFile)" Lines="@(_SpoitableSdkVersionLine)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+
+    <ItemGroup>
+      <None Include="$(_SpoitableSdkVersionFile)" Pack="true" PackagePath="build\" />
+      <FileWrites Include="$(_SpoitableSdkVersionFile)" />
+    </ItemGroup>
+  </Target>
+
+</Project>

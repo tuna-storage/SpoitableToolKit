@@ -1,0 +1,107 @@
+/* SpoitableToolKit の同梱テーマ: dark（既定）
+ *
+ * このファイルが決めるのは**色と文字組みだけ**。画面の組み立て方は触らない。
+ * シェルもモジュールのパネルも、`/_host/theme.css` としてここを引く。
+ *
+ * ## 自分のテーマを作る
+ *
+ * このディレクトリごとコピーして、名前を変える:
+ *
+ *     %LOCALAPPDATA%\SpoitableToolKit\themes\dark\    ← 同梱（更新で置き換わる）
+ *     %LOCALAPPDATA%\SpoitableToolKit\themes\mytheme\ ← コピーしたもの（触られない）
+ *
+ * 設定画面の「テーマ」に名前が出るので、そこで選ぶ。
+ * **同梱の dark / light はアプリの更新で元の内容に戻る**ので、直接編集しないこと。
+ *
+ * ## 決め事
+ *
+ * - **ここにある名前は全部埋めること。** 1 つでも欠けると、その値を使っている場所が
+ *   未定義になる（エラーは出ず、色が消えるだけなので気付きにくい）。
+ * - CSS の機能は制限していない。`@import` も `url()` も通る —
+ *   **入れたテーマの責任は入れた人が持つ**。
+ */
+
+:root {
+  /* フォームの部品とスクロールバーを、この明るさに合わせてブラウザに塗らせる。 */
+  color-scheme: dark;
+
+  /* ── 面（暗い方から） ── */
+  --bg: #0a0a0a;
+  /* サイドバーの地。本文と同じにして、線 1 本で分ける。 */
+  --side: #0a0a0a;
+  /* 一覧・札・入力欄の地。 */
+  --surface: #0e0e0e;
+  /* 面の上に置く小さなもの（件数の札・押しボタンの地）。 */
+  --raised: #171717;
+  /* 浮かぶもの（シート・メニュー・ダイアログ）。 */
+  --pop: #121212;
+
+  /* ── 線 ── */
+  --border: #242424;
+  /* 一覧の行の区切り。**一番よく目に入る線**なので、独立して弄れるようにしてある。 */
+  --soft: #191919;
+  /* グラフの目盛り。 */
+  --grid: #1f1f1f;
+
+  /* ── 指す・選ぶ ── */
+  --hover: #141414;
+  --sel: #1c1c1c;
+
+  /* ── 文字 ── */
+  --fg: #ededed;
+  --muted: #a3a3a3;
+  /* いちばん弱い字（列の見出し・注記）。地の上で 4.5:1 を割らない明るさにしてある。 */
+  --faint: #8a8a8a;
+  /* accent の上に載る文字。accent を明るい色にしたテーマは、ここを暗くする必要がある。 */
+  --on-accent: #ffffff;
+
+  /* ── 意味を持つ色 ── */
+  /* 白字が 4.5:1 を超える青（#3b82f6 は 3.7:1 で届かない）。 */
+  --accent: #2563eb;
+  --good: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
+
+  /* ── 種類の色（通知の角四角・ログの種別の印・状態の点）。モジュールもこの中から選ぶ ── */
+  --tone-gray: #a1a1a6;
+  /* 数が多くて目立たせたくないもの（API・生ログ・デバッグ）。 */
+  --tone-dim: #525252;
+  --tone-green: #4ade80;
+  --tone-red: #f87171;
+  --tone-amber: #fbbf24;
+  --tone-blue: #60a5fa;
+  --tone-purple: #c084fc;
+  --tone-teal: #2dd4bf;
+  --tone-rose: #fb7185;
+
+  /* ── 形 ── */
+  --radius-sm: 5px;
+  --radius: 6px;
+  --radius-lg: 8px;
+  /* ダイアログ・トースト。 */
+  --radius-xl: 11px;
+  --radius-pill: 999px;
+
+  /* タイトルバーを兼ねるヘッダーの高さ。**掴んで動かす面でもある**ので、狭いと掴みそこねる。 */
+  --titlebar-height: 40px;
+
+  /* 右下のトーストの基準の大きさ。**中の寸法は全部これに対する em** なので、
+     ここを大きくすれば形はそのままに全体が大きくなる（VR のサーフェス向け）。 */
+  --toast-size: 14px;
+
+  /* 消すまで出続ける帯の基準の大きさ。中の寸法はこれに対する em。 */
+  --banner-size: 14px;
+
+  /* ── 重なり ── */
+  --scrim: rgba(0, 0, 0, .6);
+  --shadow-modal: 0 24px 64px rgba(0, 0, 0, .45);
+  --shadow-pop: 0 10px 28px rgba(0, 0, 0, .4);
+
+  /* ── 文字組み ── */
+  /* 本文の大きさと太さ。**細い・小さいが見づらさの大きな理由だった**ので、14px / 450 から始める。 */
+  --font-size: 14px;
+  --font-weight: 450;
+  /* 欧文は Segoe UI Variable、和文は Noto Sans JP（Windows 11 に入っている）。無ければ Yu Gothic UI。 */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", "Noto Sans JP", "Yu Gothic UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "Noto Sans JP", monospace;
+}

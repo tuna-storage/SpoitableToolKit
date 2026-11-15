@@ -1,0 +1,5 @@
+<Project>
+
+  <Import Project="$(MSBuildThisFileDirectory)..\..\..\src\SpoitableToolKit.Sdk\InRepo.targets" />
+
+</Project>

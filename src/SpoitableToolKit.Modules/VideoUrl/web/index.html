@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Video URL</title>
+<!-- 本体の部品（`spoitable-` の class だけに当たる）。シェルと同じ 1 枚。**骨格より先に読む**。 -->
+<link rel="stylesheet" href="/_host/ui.css">
+<!-- 骨格。色は持たない。**テーマより先に読む** — 後から来た方が勝つので、
+     この順にしておくとテーマが !important 無しで上書きできる。 -->
+<link rel="stylesheet" href="/panel.css">
+<!-- 色・影・フォント。シェルもパネルも同じ 1 枚を引く（`_host/` は URL のホストに
+     関わらずシェルの web/ から配られるので、これは同一 origin）。 -->
+<link rel="stylesheet" href="/_host/theme.css">
+</head>
+<body>
+
+<main class="page">
+
+<h1 data-i18n="videourl.name"></h1>
+
+<div class="line">
+  <!-- 欄と ✕ を 1 つの箱に入れる。✕ は欄の右端に重ねるので、箱が無いと「解決」の上に乗る。 -->
+  <span class="field">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input type="text" id="url" placeholder="https://www.youtube.com/watch?v=..." spellcheck="false">
+    <!-- **欄のすぐ後ろに置く**（空のときに隠すのを CSS の `+` でやっている）。 -->
+    <button type="button" id="clear" class="clear" data-i18n-title="videourl.panel.clear"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </span>
+  <button id="go" class="primary" data-i18n="videourl.panel.resolve"></button>
+</div>
+<div class="msg" id="msg"></div>
+<div class="streams" id="streams"></div>
+
+<h2 data-i18n="videourl.panel.failures.title"></h2>
+<div class="failures" id="failures"></div>
+
+</main>
+
+<script src="/_host/bridge.js"></script>
+<script>
+const el = {
+  url: document.getElementById('url'),
+  clear: document.getElementById('clear'),
+  go: document.getElementById('go'),
+  msg: document.getElementById('msg'),
+  streams: document.getElementById('streams'),
+  failures: document.getElementById('failures'),
+};
+
+/// 日時。**形はシェルの行と同じ。**
+/// toLocaleTimeString は環境の言語で形が変わるうえ、日付が落ちる。
+function when(iso) {
+  if (!iso) return '';
+
+  const at = new Date(iso);
+  if (isNaN(at)) return iso;
+
+  const pad = n => String(n).padStart(2, '0');
+  return `${at.getFullYear()}/${pad(at.getMonth() + 1)}/${pad(at.getDate())} `
+    + `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`;
+}
+
+function busy(on) {
+  el.go.disabled = on;
+  el.go.textContent = spoitable.t(on ? 'videourl.panel.resolving' : 'videourl.panel.resolve');
+}
+
+function render(result) {
+  el.streams.replaceChildren(...result.streams.map(stream => {
+    const row = document.createElement('div');
+    row.className = 'stream ' + stream.kind;
+
+    const quality = document.createElement('span');
+    quality.className = 'q';
+    quality.textContent = stream.label;
+
+    const note = document.createElement('span');
+    note.className = 'note';
+    note.textContent = stream.note ?? '';
+
+    const url = document.createElement('span');
+    url.className = 'u';
+    url.textContent = stream.url;
+
+    const copy = document.createElement('button');
+    copy.textContent = spoitable.phrases.ui.copy;
+    copy.addEventListener('click', async () => {
+      // クリップボードはホスト側で書く。独自スキームだと navigator.clipboard が使えないことがあり、
+      // 通知から直接コピーする経路でも同じ口を使うため。
+      copy.textContent = await spoitable.copyToClipboard(stream.url)
+        ? spoitable.phrases.ui.copied : spoitable.phrases.ui.failed;
+      setTimeout(() => { copy.textContent = spoitable.phrases.ui.copy; }, 1500);
+    });
+
+    row.append(quality, note, url, copy);
+    return row;
+  }));
+}
+
+/// 待たせている間に出す文言の宛先。**関数に出してあるのは器から呼べるようにするため**
+/// （押すと本当にネットワークへ出てしまうので、押さずに分岐だけ確かめたい）。
+function runningKey(mode) {
+  return mode && mode.server ? 'videourl.panel.running.server' : 'videourl.panel.running';
+}
+
+async function resolve() {
+  const url = el.url.value.trim();
+  if (!url) return;
+
+  busy(true);
+  el.msg.className = 'msg';
+  el.streams.replaceChildren();
+
+  // **待たせている間の文言は道で変わる。** 手元なら初回に道具を取りに行くし、
+  // 外へ頼むなら手元では何も起きない。聞くのは押した時点 — 設定は開いている間にも変わる。
+  //
+  // **先に聞いてから出す。** 並べて走らせると、解決が先に落ちた後で返事が来て、
+  // 失敗の文言を「問い合わせ中…」で上書きしうる。往復は手元の橋なので一瞬。
+  // 聞けなくても止めない（文言だけの話なので、既定のまま先へ進む）。
+  const mode = await spoitable.call('getMode').catch(() => null);
+  el.msg.textContent = spoitable.t(runningKey(mode));
+
+  try {
+    const result = await spoitable.call('resolve', { url });
+    el.msg.textContent = [result.title, result.notice].filter(Boolean).join(' — ');
+    render(result);
+  } catch (err) {
+    el.msg.className = 'msg bad';
+    el.msg.textContent = String((err && err.message) || err);
+  } finally {
+    busy(false);
+  }
+}
+
+el.go.addEventListener('click', resolve);
+el.url.addEventListener('keydown', e => { if (e.key === 'Enter') resolve(); });
+
+// 欄を空にする。VR では全部選んで消すのが難しい。
+// **欄へ戻す**のは、空にしたらそのまま次の URL を貼るから。出ている結果は残す（消したいのは欄だけ）。
+el.clear.addEventListener('click', () => {
+  el.url.value = '';
+  el.url.focus();
+});
+
+// 検出した再生失敗。一覧の正は C# 側（FailureLog）で、ここはその写しでしかない。
+// パネルは開かれていないことのほうが多い（VRChat を見ている間はそもそも窓が無い）ので、
+// その間の push は届いていない。読み込み時に一度取りに行き、以降を onPush で受ける。
+
+function renderFailures(list) {
+  if (!list.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = spoitable.t('videourl.panel.failures.empty');
+    el.failures.replaceChildren(empty);
+    return;
+  }
+
+  el.failures.replaceChildren(...list.map(failure => {
+    const row = document.createElement('div');
+    row.className = 'failure';
+    row.dataset.url = failure.url;
+
+    const count = document.createElement('span');
+    count.className = 'n';
+    count.textContent = '×' + failure.failures;
+
+    const url = document.createElement('span');
+    url.className = 'u';
+    url.textContent = failure.url;
+    url.title = failure.url;
+
+    const why = document.createElement('span');
+    why.className = 'why';
+    why.textContent = failure.reason ?? '';
+    why.title = failure.reason ?? '';
+
+    const at = document.createElement('span');
+    at.className = 'at';
+    at.textContent = when(failure.lastSeen);
+
+    const go = document.createElement('button');
+    go.textContent = spoitable.t('videourl.panel.resolve');
+    go.addEventListener('click', () => {
+      // 手で貼ったときと同じ経路に乗せる。結果は上の一覧に出る。
+      el.url.value = failure.url;
+      resolve();
+      // 押して飛ぶ巻きは滑らかに（シェルと同じ）。OS で動きを減らしているなら即時。
+      window.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+    });
+
+    row.append(count, url, why, at, go);
+    return row;
+  }));
+}
+
+// **push が一度でも届いたら、読み込みの最初の一覧は捨てる。** push は毎回一覧まるごとで、最初の一覧より新しい。
+// 最初の一覧の返事が push より遅れて着くと、古い一覧で上書きして、開いた瞬間に起きた失敗が次の失敗まで消えて見える。
+let pushed = false;
+
+spoitable.onPush((channel, payload) => {
+  if (channel !== 'failures') return;
+  pushed = true;
+  renderFailures(payload);
+});
+
+spoitable.whenReady
+  .then(() => spoitable.call('getFailures'))
+  .then(list => { if (!pushed) renderFailures(list); })
+  .catch(err => { if (!pushed) el.failures.textContent = String((err && err.message) || err); });
+
+// 動作確認用。ブリッジまで通ったことの目印。
+window.__panelReady = true;
+</script>
+
+</body>
+</html>

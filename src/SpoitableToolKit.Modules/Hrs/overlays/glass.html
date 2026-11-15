@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Heart Rate — Glass</title><style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:transparent;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:'Segoe UI',system-ui,sans-serif}
+@keyframes heartbeat{0%,100%{transform:scale(1)}15%{transform:scale(1.15)}30%{transform:scale(.95)}45%{transform:scale(1.08)}}
+.card{width:600px;padding:28px 36px;background:rgba(20,20,40,.75);border-radius:28px;border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(20px)}
+.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.left{display:flex;align-items:center;gap:20px}
+.heart{font-size:44px;color:#e74c6f;animation:heartbeat var(--beat,.85s) ease-in-out infinite}
+.bpm{font-size:60px;font-weight:700;color:#eee;font-variant-numeric:tabular-nums}
+.unit{font-size:24px;color:#ccc}
+.zone{font-size:22px;font-weight:600;text-transform:uppercase}
+.graph{height:88px;background:linear-gradient(90deg,rgba(58,134,255,.08),rgba(58,134,255,.02));border-radius:12px;overflow:hidden}
+.graph canvas{width:100%;height:100%;display:block}
+.bot{display:flex;align-items:center;justify-content:space-between;margin-top:12px;font-size:14px;color:#999}
+/* status と dot は JS が書き換える。要素が無いと毎回 TypeError で以降の処理が止まる。 */
+.status{display:flex;align-items:center;gap:7px}
+.dot{width:9px;height:9px;border-radius:50%;background:#e74c3c}
+.brand{color:#999}
+body.off .heart{animation:none;opacity:.35}
+body.off .bpm{color:#888}
+</style></head><body>
+<div class="card">
+  <div class="top">
+    <div class="left">
+      <span class="heart">&#9829;</span>
+      <span class="bpm" id="bpm">--</span>
+      <span class="unit">BPM</span>
+    </div>
+    <span class="zone" id="zone" style="color:#2ecc71">Rest</span>
+  </div>
+  <div class="graph"><canvas id="cv"></canvas></div>
+  <div class="bot">
+    <span class="status"><span class="dot" id="dot"></span><span id="status">Disconnected</span></span>
+    <span id="deviceName"></span>
+    <span class="brand">SpoitableToolKit</span>
+  </div>
+</div>
+<script>
+const hist = [], MAX = 60;
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+
+function draw() {
+  const r = cv.parentElement.getBoundingClientRect();
+  cv.width = r.width * devicePixelRatio; cv.height = r.height * devicePixelRatio;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  if (hist.length < 2) return;
+  const mn = Math.min(...hist) - 3, mx = Math.max(...hist) + 3, rng = mx - mn;
+  const g = ctx.createLinearGradient(0, 0, 0, cv.height);
+  g.addColorStop(0, '#ff5555'); g.addColorStop(1, '#3a86ff');
+  ctx.strokeStyle = g; ctx.lineWidth = 1.5 * devicePixelRatio; ctx.lineJoin = 'round'; ctx.beginPath();
+  const s = cv.width / (MAX - 1), o = MAX - hist.length;
+  hist.forEach((v, i) => { const x = (o + i) * s, y = cv.height - ((v - mn) / rng) * cv.height; i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); });
+  ctx.stroke();
+}
+
+const zones = { rest: { l: 'Rest', c: '#2ecc71' }, light: { l: 'Light', c: '#3a86ff' }, moderate: { l: 'Moderate', c: '#f39c12' }, hard: { l: 'Hard', c: '#e74c3c' } };
+const p = new URLSearchParams(location.search), port = p.get('port') || location.port || '9100';
+const el = { bpm: document.getElementById('bpm'), zone: document.getElementById('zone'), status: document.getElementById('status'), dot: document.getElementById('dot'), device: document.getElementById('deviceName') };
+
+function offline() {
+  document.body.classList.add('off');
+  el.bpm.textContent = '--';
+  el.status.textContent = 'Disconnected';
+  el.dot.style.background = '#e74c3c';
+}
+
+function apply(d) {
+  if (d.connected !== undefined) {
+    el.status.textContent = d.connected ? 'Connected' : 'Disconnected';
+    el.dot.style.background = d.connected ? '#2ecc71' : '#e74c3c';
+    document.body.classList.toggle('off', !d.connected);
+    if (!d.connected) el.bpm.textContent = '--';
+  }
+  if (d.device !== undefined && d.device !== null) el.device.textContent = d.device;
+  // welcome には直近の心拍が入っている。貼った直後からグラフが埋まっているようにするため。
+  if (d.history && d.history.length) { hist.push(...d.history); while (hist.length > MAX) hist.shift(); draw(); }
+  if (d.bpm !== undefined && d.bpm > 0 && d.connected !== false) {
+    el.bpm.textContent = d.bpm;
+    document.documentElement.style.setProperty('--beat', (60 / d.bpm).toFixed(2) + 's');
+    hist.push(d.bpm); if (hist.length > MAX) hist.shift(); draw();
+  }
+  if (d.zone && zones[d.zone]) { el.zone.textContent = zones[d.zone].l; el.zone.style.color = zones[d.zone].c; }
+}
+
+let ws;
+function connect() {
+  ws = new WebSocket(`ws://${location.hostname || 'localhost'}:${port}/ws`);
+  ws.onmessage = e => apply(JSON.parse(e.data));
+  ws.onclose = () => { offline(); setTimeout(connect, 2000); };
+}
+connect();
+</script></body></html>

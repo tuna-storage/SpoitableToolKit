@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Windows.Devices.Bluetooth (WinRT) を使うので OS のバージョンまで指定する。
+         追加の依存は無い (射影は SDK の ref pack から来る)。最低 OS は Windows 10 2004。 -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <RootNamespace>SpoitableToolKit.Modules.Hrs</RootNamespace>
+    <!-- モジュールの Id と名前。フォルダ名（modules/<Id>/）・module.json・ModuleInfo.Id / Name はここから作られる。
+         Abstractions への参照・web/ と locales/ の配り方・動的に読み込まれる側の設定は、SDK の決まり
+         （../Directory.Build.props / .targets が読み込む）が持っている。 -->
+    <SpoitableModuleId>hrs</SpoitableModuleId>
+    <SpoitableModuleName>Heart Rate</SpoitableModuleName>
+    <!-- SQLite はネイティブの dll を伴う。RID を決めないと runtimes/ の下に
+         linux も osx も wasm も入った状態で配られる (実測: 30 個以上の RID)。
+         このモジュールは WinRT を使っている時点で Windows 専用なので、決め打って構わない。 -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 試験から中身を見るため。モジュールの public な面は ISpoitableModule と IModuleConfig だけに保つ。 -->
+    <InternalsVisibleTo Include="SpoitableToolKit.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ホスト本体も持っているが、モジュールは単体で完結していてよい。
+         同名のアセンブリはローダがホスト側へ寄せる（型が二重にならない）。 -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.*" />
+
+    <!-- 心拍の記録。ホストのログ DB とは別ファイル（別モジュールの持ち物で、寿命も消し方も違う）。 -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- OBS に貼るオーバーレイ。**dll に埋め込む**。
+         モジュールのアセンブリはストリームから読み込まれるので Assembly.Location が空で、
+         自分の置き場所を辿れない。ファイルで配るならホストから場所を貰う話になるが、
+         それはテーマをディレクトリで差し替えられるようにするときにまとめてやる。 -->
+    <EmbeddedResource Include="overlays\*.html" />
+  </ItemGroup>
+
+</Project>

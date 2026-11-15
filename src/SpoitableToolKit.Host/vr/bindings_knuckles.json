@@ -1,0 +1,183 @@
+{
+  "action_manifest_version": 0,
+  "alias_info": {},
+  "bindings": {
+    "/actions/pointer": {
+      "poses": [
+        {
+          "output": "/actions/pointer/in/aim",
+          "path": "/user/hand/left/pose/tip"
+        },
+        {
+          "output": "/actions/pointer/in/aim",
+          "path": "/user/hand/right/pose/tip"
+        }
+      ],
+      "haptics": [
+        {
+          "output": "/actions/pointer/out/haptic",
+          "path": "/user/hand/left/output/haptic"
+        },
+        {
+          "output": "/actions/pointer/out/haptic",
+          "path": "/user/hand/right/output/haptic"
+        }
+      ],
+      "sources": [
+        {
+          "path": "/user/hand/left/input/trigger",
+          "mode": "trigger",
+          "inputs": {
+            "click": {
+              "output": "/actions/pointer/in/click"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/grip",
+          "mode": "grab",
+          "inputs": {
+            "grab": {
+              "output": "/actions/pointer/in/grab"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/trigger",
+          "mode": "trigger",
+          "inputs": {
+            "click": {
+              "output": "/actions/pointer/in/click"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/grip",
+          "mode": "grab",
+          "inputs": {
+            "grab": {
+              "output": "/actions/pointer/in/grab"
+            }
+          }
+        }
+      ]
+    },
+    "/actions/layout": {
+      "sources": [
+        {
+          "path": "/user/hand/left/input/thumbstick",
+          "mode": "joystick",
+          "inputs": {
+            "position": {
+              "output": "/actions/layout/in/block_pos"
+            },
+            "click": {
+              "output": "/actions/layout/in/block"
+            },
+            "touch": {
+              "output": "/actions/layout/in/block"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/thumbstick",
+          "mode": "joystick",
+          "inputs": {
+            "position": {
+              "output": "/actions/layout/in/block_pos"
+            },
+            "click": {
+              "output": "/actions/layout/in/block"
+            },
+            "touch": {
+              "output": "/actions/layout/in/block"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/trackpad",
+          "mode": "trackpad",
+          "inputs": {
+            "position": {
+              "output": "/actions/layout/in/block_pos"
+            },
+            "click": {
+              "output": "/actions/layout/in/block"
+            },
+            "touch": {
+              "output": "/actions/layout/in/block"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/trackpad",
+          "mode": "trackpad",
+          "inputs": {
+            "position": {
+              "output": "/actions/layout/in/block_pos"
+            },
+            "click": {
+              "output": "/actions/layout/in/block"
+            },
+            "touch": {
+              "output": "/actions/layout/in/block"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/a",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/layout/in/block"
+            },
+            "touch": {
+              "output": "/actions/layout/in/block"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/a",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/layout/in/block"
+            },
+            "touch": {
+              "output": "/actions/layout/in/block"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/b",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/layout/in/block"
+            },
+            "touch": {
+              "output": "/actions/layout/in/block"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/b",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/layout/in/block"
+            },
+            "touch": {
+              "output": "/actions/layout/in/block"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "controller_type": "knuckles",
+  "description": "Trigger presses, squeezing grabs.",
+  "name": "SpoitableToolKit default (knuckles)",
+  "options": {},
+  "simulated_actions": []
+}

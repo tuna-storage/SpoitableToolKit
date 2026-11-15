@@ -1,0 +1,123 @@
+{
+  "action_manifest_version": 0,
+  "alias_info": {},
+  "bindings": {
+    "/actions/pointer": {
+      "poses": [
+        {
+          "output": "/actions/pointer/in/aim",
+          "path": "/user/hand/left/pose/tip"
+        },
+        {
+          "output": "/actions/pointer/in/aim",
+          "path": "/user/hand/right/pose/tip"
+        }
+      ],
+      "haptics": [
+        {
+          "output": "/actions/pointer/out/haptic",
+          "path": "/user/hand/left/output/haptic"
+        },
+        {
+          "output": "/actions/pointer/out/haptic",
+          "path": "/user/hand/right/output/haptic"
+        }
+      ],
+      "sources": [
+        {
+          "path": "/user/hand/left/input/trigger",
+          "mode": "trigger",
+          "inputs": {
+            "click": {
+              "output": "/actions/pointer/in/click"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/grip",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/pointer/in/grab"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/trigger",
+          "mode": "trigger",
+          "inputs": {
+            "click": {
+              "output": "/actions/pointer/in/click"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/grip",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/pointer/in/grab"
+            }
+          }
+        }
+      ]
+    },
+    "/actions/layout": {
+      "sources": [
+        {
+          "path": "/user/hand/left/input/trackpad",
+          "mode": "trackpad",
+          "inputs": {
+            "position": {
+              "output": "/actions/layout/in/block_pos"
+            },
+            "click": {
+              "output": "/actions/layout/in/block"
+            },
+            "touch": {
+              "output": "/actions/layout/in/block"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/trackpad",
+          "mode": "trackpad",
+          "inputs": {
+            "position": {
+              "output": "/actions/layout/in/block_pos"
+            },
+            "click": {
+              "output": "/actions/layout/in/block"
+            },
+            "touch": {
+              "output": "/actions/layout/in/block"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/left/input/application_menu",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/layout/in/block"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/application_menu",
+          "mode": "button",
+          "inputs": {
+            "click": {
+              "output": "/actions/layout/in/block"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "controller_type": "vive_controller",
+  "description": "Trigger presses, grip grabs.",
+  "name": "SpoitableToolKit default (vive_controller)",
+  "options": {},
+  "simulated_actions": []
+}

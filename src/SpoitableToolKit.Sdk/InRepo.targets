@@ -1,0 +1,21 @@
+<Project>
+
+  <!--
+    この repo の中のモジュールが、パッケージの代わりに読むもの（後半）。**読み込む所は Directory.Build.targets**。
+  -->
+
+  <ItemGroup>
+    <!-- パッケージでは dll が ref/ にだけ入っていて、コンパイルにしか使われない。ここでも出力へコピーさせない
+         （Abstractions は本体が読み込んだ 1 つを共有する。モジュールのフォルダにもあると、型が二重になる）。 -->
+    <!-- SpoitableSdk: これは SDK そのものへの参照、という印。契約の project は SDK のほかを参照できない（STK033）ので、見分けに要る。 -->
+    <ProjectReference Include="$(MSBuildThisFileDirectory)..\SpoitableToolKit.Abstractions\SpoitableToolKit.Abstractions.csproj"
+                      Private="false" SpoitableSdk="true" />
+
+    <!-- SDK のアナライザー（STK040〜）。パッケージでは analyzers/dotnet/cs/ に入っていて、コンパイラが読む。ここでも同じく、コンパイラにだけ渡す。 -->
+    <ProjectReference Include="$(MSBuildThisFileDirectory)..\SpoitableToolKit.Sdk.Analyzers\SpoitableToolKit.Sdk.Analyzers.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" Private="false" SpoitableSdk="true" />
+  </ItemGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)build\SpoitableToolKit.Sdk.targets" />
+
+</Project>

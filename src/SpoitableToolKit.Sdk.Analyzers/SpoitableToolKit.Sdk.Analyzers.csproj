@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    モジュールのコードを build のときに読んで、決まりに外れた書き方を止めるアナライザー（STK040 から。STK001〜033 は SDK の targets が MSBuild で見る）。
+    パッケージ SpoitableToolKit.Sdk の analyzers/dotnet/cs/ に入り（Abstractions の csproj が詰める）、repo の中のモジュールには InRepo.targets が効かせる。
+
+    **netstandard2.0 で、Roslyn は古めの版に留める。** アナライザーは、モジュールを build するコンパイラより新しい Roslyn を参照していると読み込まれない
+    （読み込めなくても build は通り、CS8032 の警告が出るだけ — 黙って効かなくなる）。.NET SDK 10.0.100 の Roslyn が 5.0 なので、それより古い 4.8 にする。
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <!-- RS2008: 決まりの出し入れを AnalyzerReleases.*.md に記録する仕組み。決まりの一覧と文は試験で固定してあるので使わない。 -->
+    <NoWarn>$(NoWarn);RS2008</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

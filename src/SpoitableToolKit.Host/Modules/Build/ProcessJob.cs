@@ -1,0 +1,102 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+namespace SpoitableToolKit.Host.Modules.Build;
+
+/// <summary>
+/// 起動した子のプロセスを、<b>その子孫ごと</b>まとめて止めるための入れ物（Windows の Job Object）。
+/// <para>
+/// 入れたプロセスと、そこから生まれたプロセスは全部この中に入る。<see cref="Dispose"/> で（= 入れ物の最後の口を閉じると）全部が止まる。
+/// <b>アプリが落ちたとき・閉じたときも、口は OS が閉じるので、子は残らない。</b>
+/// </para>
+/// <para>
+/// <c>Process.Kill(entireProcessTree: true)</c> では足りない: 親が先に抜けると、残った孫を辿れない。アプリが閉じたあとの子も止まらない。
+/// </para>
+/// </summary>
+internal sealed class ProcessJob : IDisposable
+{
+    private const int ExtendedLimitInformation = 9;
+    private const uint KillOnJobClose = 0x2000;
+
+    private readonly SafeFileHandle _handle;
+
+    private ProcessJob(SafeFileHandle handle) => _handle = handle;
+
+    /// <summary>入れ物を作る。作れなければ null（古い Windows で、アプリ自身が入れ子にできない入れ物の中にいるとき）。</summary>
+    public static ProcessJob? TryCreate()
+    {
+        var handle = CreateJobObjectW(IntPtr.Zero, null);
+        if (handle.IsInvalid) return null;
+
+        var limits = new ExtendedLimits { Basic = { LimitFlags = KillOnJobClose } };
+        if (SetInformationJobObject(handle, ExtendedLimitInformation, ref limits, (uint)Marshal.SizeOf<ExtendedLimits>()))
+            return new ProcessJob(handle);
+
+        handle.Dispose();
+        return null;
+    }
+
+    /// <summary>起動した直後のプロセスを入れる。入れられなければ false（もう抜けている・入れ子にできない）。</summary>
+    public bool TryAdd(Process process)
+    {
+        try
+        {
+            return AssignProcessToJobObject(_handle, process.Handle);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    public void Dispose() => _handle.Dispose();
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BasicLimits
+    {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoCounters
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ExtendedLimits
+    {
+        public BasicLimits Basic;
+        public IoCounters Io;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern SafeFileHandle CreateJobObjectW(IntPtr attributes, string? name);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetInformationJobObject(SafeFileHandle job, int kind, ref ExtendedLimits limits, uint size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AssignProcessToJobObject(SafeFileHandle job, IntPtr process);
+}

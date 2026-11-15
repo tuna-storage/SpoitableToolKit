@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>My module</title>
+<!-- 本体の部品（spoitable- で始まる class だけに当たる）→ このページの骨格 → 色・影・フォント（テーマ）の順に読む。
+     /_host/ は本体が配る（どのモジュールのページからも同じパスで引ける）。 -->
+<link rel="stylesheet" href="/_host/ui.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 1.1em 1.6em; background: var(--bg); color: var(--fg); font: var(--font-weight) var(--font-size)/1.5 var(--font-ui); }
+</style>
+<link rel="stylesheet" href="/_host/theme.css">
+<script src="/_host/bridge.js"></script>
+
+<section class="spoitable-card">
+  <div class="spoitable-card-head">
+    <h2 data-i18n="mymodule.title"></h2>
+    <button class="spoitable-btn spoitable-btn-small" id="reload" data-i18n="common.ui.reload"></button>
+  </div>
+</section>
+
+<script>
+document.getElementById('reload').addEventListener('click', () => location.reload());
+</script>

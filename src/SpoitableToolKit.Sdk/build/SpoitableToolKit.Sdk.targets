@@ -1,0 +1,390 @@
+<Project>
+
+  <!--
+    モジュールを作る側の build の決まり（後半）。パッケージ SpoitableToolKit.Sdk の build/ に入り、
+    参照した project の**本体より後**に読み込まれる（repo の中のモジュールは ../InRepo.targets 経由で同じものを読む）。
+
+    csproj に書くもの:
+      <SpoitableModuleId>mymodule</SpoitableModuleId>        フォルダ名（modules/<Id>/）・翻訳キーの頭・ModuleInfo.Id になる
+      <SpoitableModuleName>My module</SpoitableModuleName>   画面に出る名前。ModuleInfo.Name になる
+      版は <Version>。
+
+    ここがやること:
+      - Id と名前を確かめる（本体が入れるときに確かめるのと同じ決まり。外れたら build を止める）
+      - ModuleInfo.g.cs を作る（ModuleInfo.Id / Name / Version と、dll に刻む Id と名前。ISpoitableModule.Id / DisplayName の既定の本体が、刻んだものを返す —
+        Id を書く所を csproj の 1 か所にする。ModuleInfo.ModuleDirectory は、本体がこのモジュールを読み込んだフォルダ）
+      - module.json を出力に作る（本体が、入れる前にこれを読む）
+      - web/ と locales/ を出力へ配る
+      - 契約の dll への参照の印（SpoitableContract）に従って、dll を shared/ へ配る・配らない
+      - 配るための zip を作る（-t:SpoitablePackModule）
+  -->
+
+  <PropertyGroup>
+    <!-- 何を作る project か。Module: 本体が読み込むモジュール／Contract: モジュールどうしが共有する interface の dll／
+         Library: 共有の dll だけを配るもの。書かなければ Module。 -->
+    <SpoitableProjectKind Condition="'$(SpoitableProjectKind)' == ''">Module</SpoitableProjectKind>
+
+    <!-- Id の決まり。**本体（ModuleManifest.IsValidId）と同じ**。試験がここを読んで、同じ答えになることを突き合わせる。 -->
+    <SpoitableIdPattern>^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?\z</SpoitableIdPattern>
+    <SpoitableIdDevicePattern>^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|\z)</SpoitableIdDevicePattern>
+    <SpoitableIdReservedPattern>(?i)^(host|common)(\.|\z)</SpoitableIdReservedPattern>
+
+    <!-- 名前の長さの上限。**本体（ModuleManifest.MaxNameLength）と同じ**。試験がここを読んで突き合わせる。 -->
+    <SpoitableNameMaxLength>128</SpoitableNameMaxLength>
+
+    <!-- 名前に入れられない字: 制御文字・書式の字（字の向きを変える U+202E など・幅の無い字）・行と段落の区切り（U+2028・U+2029）。
+         **本体（ModuleManifest.NameForbiddenPattern）と同じ**。試験がここを読んで突き合わせる。 -->
+    <SpoitableNameForbiddenPattern>[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]</SpoitableNameForbiddenPattern>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <_SpoitableIsModule Condition="'$(SpoitableProjectKind)' == 'Module'">true</_SpoitableIsModule>
+    <_SpoitableIsLibrary Condition="'$(SpoitableProjectKind)' == 'Library'">true</_SpoitableIsLibrary>
+    <_SpoitableIsContract Condition="'$(SpoitableProjectKind)' == 'Contract'">true</_SpoitableIsContract>
+    <!-- modules/<Id>/ に入るもの（モジュールとライブラリ）。Id・名前・module.json が要る。 -->
+    <_SpoitableIsInstallable Condition="'$(_SpoitableIsModule)' == 'true' or '$(_SpoitableIsLibrary)' == 'true'">true</_SpoitableIsInstallable>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(_SpoitableIsModule)' == 'true'">
+    <!-- パネルのページ。modules/<Id>/web/ に置かれ、spoitable://<Id>/ で配信される。 -->
+    <None Update="web\**\*" CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- このモジュールの文言。modules/<Id>/locales/<言語>.json に置かれ、本体が合成する（キーは <Id>. で始める）。 -->
+    <None Update="locales\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    アナライザー（STK040〜。パッケージの analyzers/ に入っている）へ渡すもの。アナライザーはファイルを探さないので、ここで調べて渡す。
+      SpoitableHasPanelPage: web/index.html がある（STK041: あるのに host.Ui.RegisterPanel を呼んでいなければ警告）。モジュールだけ。
+  -->
+  <PropertyGroup Condition="'$(_SpoitableIsModule)' == 'true' and Exists('$(MSBuildProjectDirectory)\web\index.html')">
+    <SpoitableHasPanelPage>true</SpoitableHasPanelPage>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CompilerVisibleProperty Include="SpoitableHasPanelPage" />
+  </ItemGroup>
+
+  <!--
+    build の頭で確かめる。文は「何が悪いか・どう直すか」まで書く（モジュールを書くのは AI なので、文だけで直せるように）。
+    文は試験で固定してある。
+  -->
+  <Target Name="SpoitableCheckProject" BeforeTargets="BeforeBuild">
+    <Error Code="STK001"
+           Condition="'$(_SpoitableIsModule)' != 'true' and '$(_SpoitableIsLibrary)' != 'true' and '$(_SpoitableIsContract)' != 'true'"
+           Text="SpoitableProjectKind is '$(SpoitableProjectKind)', which is not a kind the SDK knows. Use Module (a module the app loads; the default when the property is left out), Contract (a dll of interfaces that modules share with each other) or Library (a package that only ships shared dlls)." />
+
+    <Error Code="STK002"
+           Condition="'$(SpoitableSdkVersion)' == ''"
+           Text="SpoitableSdkVersion is empty, so only a part of the SDK's build files was loaded. Reference the SDK as a package (&lt;PackageReference Include=&quot;SpoitableToolKit.Sdk&quot; Version=&quot;...&quot; /&gt;) and do not import its .props or .targets by hand." />
+
+    <Error Code="STK010"
+           Condition="'$(_SpoitableIsInstallable)' == 'true' and '$(SpoitableModuleId)' == ''"
+           Text="$(MSBuildProjectName): SpoitableModuleId is not set. Add &lt;SpoitableModuleId&gt;mymodule&lt;/SpoitableModuleId&gt; to the csproj (lower case). It becomes the module's folder (modules/&lt;Id&gt;/), the start of its translation keys, and ModuleInfo.Id. If this project is not a module but a dll of interfaces that modules share, set &lt;SpoitableProjectKind&gt;Contract&lt;/SpoitableProjectKind&gt; instead." />
+
+    <PropertyGroup Condition="'$(_SpoitableIsInstallable)' == 'true' and '$(SpoitableModuleId)' != ''">
+      <_SpoitableIdReserved>$([System.Text.RegularExpressions.Regex]::IsMatch('$(SpoitableModuleId)', '$(SpoitableIdReservedPattern)'))</_SpoitableIdReserved>
+      <_SpoitableIdShaped>$([System.Text.RegularExpressions.Regex]::IsMatch('$(SpoitableModuleId)', '$(SpoitableIdPattern)'))</_SpoitableIdShaped>
+      <_SpoitableIdDevice>$([System.Text.RegularExpressions.Regex]::IsMatch('$(SpoitableModuleId)', '$(SpoitableIdDevicePattern)'))</_SpoitableIdDevice>
+      <_SpoitableIdDots>$(SpoitableModuleId.Contains('..'))</_SpoitableIdDots>
+    </PropertyGroup>
+
+    <Error Code="STK011"
+           Condition="'$(_SpoitableIdReserved)' == 'True'"
+           Text="$(MSBuildProjectName): SpoitableModuleId is '$(SpoitableModuleId)', which is reserved for the app itself ('host' and 'common', and any Id that starts with 'host.' or 'common.'). Give the module an Id of its own, for example its name in lower case." />
+
+    <Error Code="STK012"
+           Condition="'$(_SpoitableIdReserved)' == 'False' and ('$(_SpoitableIdShaped)' != 'True' or '$(_SpoitableIdDevice)' == 'True' or '$(_SpoitableIdDots)' == 'True')"
+           Text="$(MSBuildProjectName): SpoitableModuleId is '$(SpoitableModuleId)'. It must be 1-64 characters of a-z, 0-9, '.', '_' or '-', starting and ending with a letter or digit, without '..', and not a Windows device name such as con or nul. It becomes a folder name and a part of URLs, so upper case and other characters are not accepted." />
+
+    <Error Code="STK013"
+           Condition="'$(_SpoitableIsInstallable)' == 'true' and '$(SpoitableModuleName.Trim())' == ''"
+           Text="$(MSBuildProjectName): SpoitableModuleName is not set. Add &lt;SpoitableModuleName&gt;My module&lt;/SpoitableModuleName&gt; to the csproj. It is the name people see in the app (the module list and the sidebar), and it becomes ModuleInfo.Name." />
+
+    <PropertyGroup Condition="'$(_SpoitableIsInstallable)' == 'true'">
+      <!-- C# は U+2028・U+2029 も文字列の中の改行として扱うので、通すと ModuleInfo.g.cs がコンパイルできない。
+           書式の字（見えないのに後ろの字の並びを変える）は build は通るが、本体が入れるときに断るので、ここで止める。 -->
+      <_SpoitableNameControl>$([System.Text.RegularExpressions.Regex]::IsMatch('$(SpoitableModuleName)', '$(SpoitableNameForbiddenPattern)'))</_SpoitableNameControl>
+      <!-- 版は module.json と ModuleInfo.g.cs にそのまま書く。引用符などが入ると、どちらも壊れる。 -->
+      <_SpoitableVersionShaped>$([System.Text.RegularExpressions.Regex]::IsMatch('$(Version)', '^[0-9A-Za-z.+-]{1,64}\z'))</_SpoitableVersionShaped>
+    </PropertyGroup>
+
+    <Error Code="STK014"
+           Condition="'$(_SpoitableNameControl)' == 'True'"
+           Text="$(MSBuildProjectName): SpoitableModuleName has a line break, a control character or an invisible formatting character (such as a zero-width space or a text-direction mark) in it. Write the name on one line with visible characters only: &lt;SpoitableModuleName&gt;My module&lt;/SpoitableModuleName&gt;." />
+
+    <Error Code="STK016"
+           Condition="'$(_SpoitableIsInstallable)' == 'true' and $(SpoitableModuleName.Length) &gt; $(SpoitableNameMaxLength)"
+           Text="$(MSBuildProjectName): SpoitableModuleName is $(SpoitableModuleName.Length) characters long. Keep it to $(SpoitableNameMaxLength) characters or fewer: the app shows it in the module list and when it asks before installing, and refuses a longer one." />
+
+    <Error Code="STK015"
+           Condition="'$(_SpoitableIsInstallable)' == 'true' and '$(_SpoitableVersionShaped)' != 'True'"
+           Text="$(MSBuildProjectName): Version is '$(Version)'. Write it as numbers separated by dots, such as &lt;Version&gt;1.0.0&lt;/Version&gt; (a suffix such as -beta.1 is fine; at most 64 characters of letters, digits, '.', '-' and '+'). It is written into module.json and ModuleInfo.Version, and the app shows it next to the module's name." />
+
+    <!--
+      契約（Contract）は interface だけの dll 1 つ。渡す側が shared/ に持っていくのはその dll だけで、契約が参照している物は付いていかない
+      （本体は shared/ の dll を、ほかのフォルダを探さずに読む）。SDK のほかを参照していたら止める。
+      repo の中では、SDK はパッケージではなく project への参照（../InRepo.targets が SpoitableSdk の印を付ける）。
+    -->
+    <ItemGroup Condition="'$(_SpoitableIsContract)' == 'true'">
+      <_SpoitableContractExtraReference Include="@(ProjectReference)" Condition="'%(ProjectReference.SpoitableSdk)' != 'true'" />
+      <_SpoitableContractExtraReference Include="@(PackageReference)"
+                                        Condition="'%(PackageReference.Identity)' != 'SpoitableToolKit.Sdk' and '%(PackageReference.IsImplicitlyDefined)' != 'true'" />
+      <!-- dll を直に指す参照。この時点（build の頭）では、csproj に書いたものだけが入っている。 -->
+      <_SpoitableContractExtraReference Include="@(Reference)" />
+    </ItemGroup>
+
+    <Error Code="STK033"
+           Condition="'@(_SpoitableContractExtraReference)' != ''"
+           Text="$(MSBuildProjectName) is a Contract project and references @(_SpoitableContractExtraReference->'%(Filename)%(Extension)', ', '). A contract is one dll of interfaces: the module that provides it puts that dll into its shared/ folder, and what the contract references does not go with it, so the app could not load the contract. Keep SpoitableToolKit.Sdk as its only reference, and declare the types the interfaces need inside the contract." />
+  </Target>
+
+  <!--
+    ModuleInfo.g.cs。Id と名前を dll にも刻む（AssemblyMetadata の SpoitableToolKit.ModuleId / SpoitableToolKit.ModuleName）。
+    ISpoitableModule.Id / DisplayName の既定の本体がそれを返すので、モジュールのクラスには書かない — Id を書く所が csproj の 1 か所になる
+    （フォルダ名・module.json・dll に刻んだ Id が食い違うと、本体は読み込まない。キーの名前は Abstractions の ISpoitableModule と同じ）。
+    ModuleInfo.ModuleDirectory は、本体がこのモジュールを読み込んだフォルダ。中身（読み込んだ AssemblyLoadContext に聞く・本体の外なら例外）は
+    Abstractions の IModuleLoadContext.DirectoryOf に置く（ここの行は MSBuild の項目を通るので、; * ? を含む式や文を書かない）。
+    名前空間には入れない（どこからでも ModuleInfo.Id で届く。RootNamespace は名前空間として書けない字を持ちうる）。
+    中身が同じなら書き直さない（書き直すと、毎回コンパイルし直しになる）。
+  -->
+  <Target Name="SpoitableWriteModuleInfo" BeforeTargets="BeforeCompile;CoreCompile" DependsOnTargets="SpoitableCheckProject"
+          Condition="'$(_SpoitableIsModule)' == 'true'">
+    <PropertyGroup>
+      <_SpoitableInfoFile>$(IntermediateOutputPath)ModuleInfo.g.cs</_SpoitableInfoFile>
+      <!-- C# の文字列として書けるように。制御文字は SpoitableCheckProject が止めている。 -->
+      <_SpoitableQuotedName>$(SpoitableModuleName.Replace('\', '\\').Replace('"', '\"'))</_SpoitableQuotedName>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <!-- 項目は ; で割れ、* と ? は探しに行くので、値は Escape を通し、行の終わりの ; は %3B で書く。 -->
+      <_SpoitableInfoLine Include="// &lt;auto-generated/&gt;" />
+      <_SpoitableInfoLine Include="[assembly: global::System.Reflection.AssemblyMetadata(&quot;SpoitableToolKit.ModuleId&quot;, ModuleInfo.Id)]" />
+      <_SpoitableInfoLine Include="[assembly: global::System.Reflection.AssemblyMetadata(&quot;SpoitableToolKit.ModuleName&quot;, ModuleInfo.Name)]" />
+      <_SpoitableInfoLine Include="/// &lt;summary&gt;What the csproj says about this module (SpoitableModuleId, SpoitableModuleName, Version), and the folder the app loaded it from. ISpoitableModule.Id and ISpoitableModule.DisplayName already return Id and Name (the build writes them into the dll), so the module class does not write them.&lt;/summary&gt;" />
+      <_SpoitableInfoLine Include="internal static class ModuleInfo" />
+      <_SpoitableInfoLine Include="{" />
+      <_SpoitableInfoLine Include="public const string Id = &quot;$([MSBuild]::Escape('$(SpoitableModuleId)'))&quot;%3B" />
+      <_SpoitableInfoLine Include="public const string Name = &quot;$([MSBuild]::Escape('$(_SpoitableQuotedName)'))&quot;%3B" />
+      <_SpoitableInfoLine Include="public const string Version = &quot;$([MSBuild]::Escape('$(Version)'))&quot;%3B" />
+      <_SpoitableInfoLine Include="/// &lt;summary&gt;The folder the app loaded this module from (modules/[Id]/), holding everything in its build output. Open a file the module ships with &lt;c&gt;Path.Combine(ModuleInfo.ModuleDirectory, &quot;some/file&quot;)&lt;/c&gt;. Read only, see &lt;see cref=&quot;global::SpoitableToolKit.Abstractions.Modules.IModuleLoadContext.DirectoryOf&quot;/&gt;.&lt;/summary&gt;" />
+      <_SpoitableInfoLine Include="public static string ModuleDirectory =&gt; global::SpoitableToolKit.Abstractions.Modules.IModuleLoadContext.DirectoryOf(typeof(ModuleInfo).Assembly)%3B" />
+      <_SpoitableInfoLine Include="}" />
+    </ItemGroup>
+
+    <WriteLinesToFile File="$(_SpoitableInfoFile)" Lines="@(_SpoitableInfoLine)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+
+    <ItemGroup>
+      <Compile Include="$(_SpoitableInfoFile)" />
+      <FileWrites Include="$(_SpoitableInfoFile)" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    module.json。本体が、入れる前に Id・名前・版・作ったときの SDK の版を知るために読む。
+    **項目（None / Content）にはせず、出力へ直に書く。** 項目にすると、この project を参照している project の出力にも流れて、
+    別のモジュールの module.json と同じ場所に重なる。
+  -->
+  <Target Name="SpoitableWriteModuleManifest" AfterTargets="CopyFilesToOutputDirectory" DependsOnTargets="SpoitableCheckProject"
+          Condition="'$(_SpoitableIsInstallable)' == 'true'">
+    <PropertyGroup>
+      <_SpoitableManifestFile>$(TargetDir)module.json</_SpoitableManifestFile>
+      <!-- JSON の文字列として書けるように（C# と同じ 2 つ）。 -->
+      <_SpoitableJsonName>$(SpoitableModuleName.Replace('\', '\\').Replace('"', '\"'))</_SpoitableJsonName>
+      <_SpoitableManifest>{ "id": "$(SpoitableModuleId)", "name": "$(_SpoitableJsonName)", "version": "$(Version)", "sdk": "$(SpoitableSdkVersion)" }</_SpoitableManifest>
+    </PropertyGroup>
+
+    <WriteLinesToFile File="$(_SpoitableManifestFile)" Lines="$([MSBuild]::Escape('$(_SpoitableManifest)'))" Overwrite="true" WriteOnlyWhenDifferent="true" />
+
+    <ItemGroup>
+      <FileWrites Include="$(_SpoitableManifestFile)" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    モジュールどうしで API を渡すときの、契約の dll（interface だけを置いた dll）への参照の印:
+
+      渡す側   <ProjectReference Include="..\My.Contract\My.Contract.csproj" SpoitableContract="Provide" />
+      使う側   <ProjectReference Include="..\My.Contract\My.Contract.csproj" SpoitableContract="Use" />
+      （PackageReference でも同じ）
+
+    Provide: 契約の dll は出力の shared/ に入る。本体が起動のときに 1 つだけ読み込んで、どのモジュールにも同じ型として見せる。
+    Use:     契約の dll は出力に入れない。渡す側が持ってきたものを使う（自分でも持つと、同じ名前の型が 2 つになって受け渡せない）。
+
+    契約の project（SpoitableProjectKind が Contract）を印なしで参照したら、build を止める。
+  -->
+  <Target Name="SpoitableCheckContracts" BeforeTargets="BeforeBuild" DependsOnTargets="SpoitableCheckProject"
+          Condition="'$(_SpoitableIsInstallable)' == 'true'">
+    <ItemGroup>
+      <_SpoitableMarkedReference Include="@(ProjectReference)" Condition="'%(ProjectReference.SpoitableContract)' != ''" />
+      <_SpoitableMarkedReference Include="@(PackageReference)" Condition="'%(PackageReference.SpoitableContract)' != ''" />
+      <_SpoitableBadMark Include="@(_SpoitableMarkedReference)"
+                         Condition="'%(_SpoitableMarkedReference.SpoitableContract)' != 'Provide' and '%(_SpoitableMarkedReference.SpoitableContract)' != 'Use'" />
+      <_SpoitableUnmarkedProject Include="@(ProjectReference)" Condition="'%(ProjectReference.SpoitableContract)' == ''" />
+      <_SpoitableMarkedPackage Include="@(PackageReference)" Condition="'%(PackageReference.SpoitableContract)' != ''" />
+    </ItemGroup>
+
+    <Error Code="STK030"
+           Condition="'@(_SpoitableBadMark)' != ''"
+           Text="$(MSBuildProjectName): the reference to %(_SpoitableBadMark.Filename)%(_SpoitableBadMark.Extension) has SpoitableContract=&quot;%(_SpoitableBadMark.SpoitableContract)&quot;. Write Provide (this module brings the contract dll: it goes into the module's shared/ folder) or Use (another module brings it: nothing is copied)." />
+
+    <!-- 印の無い ProjectReference には、何の project かを聞く（SDK を使っていない project は答えない = 契約ではない）。 -->
+    <MSBuild Projects="@(_SpoitableUnmarkedProject)" Targets="SpoitableGetProjectKind" SkipNonexistentTargets="true"
+             Condition="'@(_SpoitableUnmarkedProject)' != ''">
+      <Output TaskParameter="TargetOutputs" ItemName="_SpoitableReferencedProject" />
+    </MSBuild>
+
+    <ItemGroup>
+      <_SpoitableUnmarkedContract Include="@(_SpoitableReferencedProject->WithMetadataValue('SpoitableProjectKind', 'Contract'))" />
+    </ItemGroup>
+
+    <Error Code="STK031"
+           Condition="'@(_SpoitableUnmarkedContract)' != ''"
+           Text="$(MSBuildProjectName) references the contract project %(_SpoitableUnmarkedContract.Filename)%(_SpoitableUnmarkedContract.Extension) without saying which side it is on. Add SpoitableContract=&quot;Provide&quot; to the ProjectReference if this module brings the contract dll (it registers the API), or SpoitableContract=&quot;Use&quot; if another module brings it (this one only calls the API). Without the mark the dll is copied next to the module's own dll, and each module would load its own copy of the interface." />
+  </Target>
+
+  <!-- 参照している側が聞く: この project は何を作るものか。 -->
+  <Target Name="SpoitableGetProjectKind" Returns="@(_SpoitableThisProject)">
+    <ItemGroup>
+      <_SpoitableThisProject Include="$(MSBuildProjectFullPath)" SpoitableProjectKind="$(SpoitableProjectKind)" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    印の付いたパッケージから来たファイルを拾う。コピーされるファイルには PackageReference の印は付いておらず、パッケージの名前（NuGetPackageId）
+    だけが付いているので、**印の付いたパッケージ 1 つごとにこの target を回して**（Outputs の %(…Identity)）、名前で突き合わせる。
+    項目の式の中に %(…) を直に書いても、ここでは 1 つずつには分かれない（空になる）。
+  -->
+  <Target Name="SpoitableCollectContractPackageFiles" DependsOnTargets="SpoitableCheckContracts" Outputs="%(_SpoitableMarkedPackage.Identity)">
+    <PropertyGroup>
+      <_SpoitableContractPackage>%(_SpoitableMarkedPackage.Identity)</_SpoitableContractPackage>
+      <_SpoitableContractSide>%(_SpoitableMarkedPackage.SpoitableContract)</_SpoitableContractSide>
+    </PropertyGroup>
+
+    <!-- 名前が空のまま突き合わせると、パッケージから来ていないファイル全部に当たる。印の付いたパッケージが無いときは何もしない。 -->
+    <ItemGroup Condition="'$(_SpoitableContractPackage)' != ''">
+      <_SpoitableProvidedFile Condition="'$(_SpoitableContractSide)' == 'Provide'"
+                              Include="@(ReferenceCopyLocalPaths->WithMetadataValue('NuGetPackageId', '$(_SpoitableContractPackage)'))" />
+      <_SpoitableUsedFile Condition="'$(_SpoitableContractSide)' == 'Use'"
+                          Include="@(ReferenceCopyLocalPaths->WithMetadataValue('NuGetPackageId', '$(_SpoitableContractPackage)'))" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    印の付いた参照の dll を、出力へコピーするものの一覧（ReferenceCopyLocalPaths）の中で動かす: Provide は shared/ へ、Use は外す。
+    ProjectReference の印は、コピーされるファイルに引き継がれている。PackageReference の分は、上の target が拾ってある。
+
+    **参照が解けた直後（ResolveReferences のあと）に動かす。** BeforeTargets="CopyFilesToOutputDirectory" では遅い:
+    コピーそのもの（_CopyFilesMarkedCopyLocal）は CopyFilesToOutputDirectory が頼っている target で、BeforeTargets はそのあとに走る。
+  -->
+  <Target Name="SpoitablePlaceContracts" AfterTargets="ResolveReferences" DependsOnTargets="SpoitableCheckContracts;SpoitableCollectContractPackageFiles"
+          Condition="'$(_SpoitableIsInstallable)' == 'true'">
+    <ItemGroup>
+      <_SpoitableProvidedFile Include="@(ReferenceCopyLocalPaths->WithMetadataValue('SpoitableContract', 'Provide'))" />
+      <_SpoitableUsedFile Include="@(ReferenceCopyLocalPaths->WithMetadataValue('SpoitableContract', 'Use'))" />
+
+      <!-- サブフォルダに置かれるはずのファイル（文化ごとの de\*.resources.dll・native の runtimes\…）。 -->
+      <_SpoitableNestedContractFile Include="@(_SpoitableProvidedFile)" Condition="'%(_SpoitableProvidedFile.DestinationSubDirectory)' != ''" />
+    </ItemGroup>
+
+    <!--
+      shared/ へ入れ直すと元のサブフォルダは消えて、全部が shared/ の直下に並ぶ（文化どうしで同じ名前がぶつかる）。
+      本体が読むのは shared/ の直下の dll だけなので、置き場を保っても見つからない。止める。
+    -->
+    <Error Code="STK032"
+           Condition="'@(_SpoitableNestedContractFile)' != ''"
+           Text="$(MSBuildProjectName): the contract it provides brings files that belong in a sub-folder (@(_SpoitableNestedContractFile->'%(DestinationSubDirectory)%(Filename)%(Extension)', ', ')). A contract is one dll of interfaces: the app loads the dlls right in shared/ and nothing below it, so translated resources or native files of a contract would not be found. Provide a contract that is a single dll." />
+
+    <ItemGroup>
+      <ReferenceCopyLocalPaths Remove="@(_SpoitableProvidedFile);@(_SpoitableUsedFile)" />
+      <ReferenceCopyLocalPaths Include="@(_SpoitableProvidedFile)" DestinationSubDirectory="shared\" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    配るための zip を作る:
+
+      dotnet build -c Release -t:SpoitablePackModule
+
+    bin/module/<Id>-<版>-module.zip が出来る。GitHub のリリースに添えると、本体の「モジュール」の画面から repo の URL で入れられる。
+    中身は build の出力そのまま（module.json が一番上）。入れないもの: *.pdb（作った機械のパスが入っている）と、
+    本体が印に使う名前のファイル（.remove・.disabled・.source.json。入っていると本体が断る）。
+
+    ライブラリ（SpoitableProjectKind が Library）の zip は module.json と shared/ だけ。自分の dll も、一緒に出力へ来た dll も shared/ に入れる
+    （本体はライブラリを「直下に dll が無く、shared/ に dll がある」で見分ける）。
+  -->
+  <PropertyGroup>
+    <!-- zip の置き場。**出力（$(TargetDir)）の外に置く。** 中に置くと、出力を丸ごと配る側が zip まで拾い、次の回には zip が前の zip を含む。 -->
+    <SpoitableModulePackageDirectory Condition="'$(SpoitableModulePackageDirectory)' == ''">$(MSBuildProjectDirectory)\bin\module\</SpoitableModulePackageDirectory>
+  </PropertyGroup>
+
+  <!-- zip にできる種類かを、build の前に確かめる（build してから断ると、関係のないコンパイルのエラーが先に出る）。 -->
+  <Target Name="SpoitableCheckPackable" DependsOnTargets="SpoitableCheckProject">
+    <Error Code="STK020"
+           Condition="'$(_SpoitableIsInstallable)' != 'true'"
+           Text="$(MSBuildProjectName) is a $(SpoitableProjectKind) project, and only a Module or a Library is packed into a zip. A contract dll is not installed on its own: the module that provides it carries it (mark that module's reference to this project with SpoitableContract=&quot;Provide&quot;, and pack that module)." />
+
+    <!-- zip の置き場が出力の中に入っていないか。置き場を中に書いたときも、出力の方を動かして（-o・OutputPath）置き場が中に入ったときも。
+         モジュールだけ（ライブラリの zip は module.json と dll だけを拾い、出力を丸ごとは入れない）。 -->
+    <PropertyGroup>
+      <_SpoitablePackageDirectoryFull>$([MSBuild]::EnsureTrailingSlash($([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(SpoitableModulePackageDirectory)'))))))</_SpoitablePackageDirectoryFull>
+      <_SpoitableTargetDirFull>$([MSBuild]::EnsureTrailingSlash($([System.IO.Path]::GetFullPath('$(TargetDir)'))))</_SpoitableTargetDirFull>
+      <_SpoitablePackageInsideOutput>$(_SpoitablePackageDirectoryFull.StartsWith('$(_SpoitableTargetDirFull)', System.StringComparison.OrdinalIgnoreCase))</_SpoitablePackageInsideOutput>
+    </PropertyGroup>
+
+    <Error Code="STK023"
+           Condition="'$(_SpoitableIsModule)' == 'true' and '$(_SpoitablePackageInsideOutput)' == 'True'"
+           Text="$(MSBuildProjectName): the zip would be written into the build output folder ($(_SpoitablePackageDirectoryFull) is inside $(_SpoitableTargetDirFull)). The zip holds everything in that folder, so it would take in the zip of the build before it and grow with every build. Point SpoitableModulePackageDirectory outside the output folder, or leave it out (the zip then goes to bin/module/ next to the csproj) and keep the output folder from containing that place (-o and OutputPath move the output folder)." />
+  </Target>
+
+  <Target Name="SpoitablePackModule" DependsOnTargets="SpoitableCheckPackable;Build" Returns="$(SpoitableModulePackage)">
+    <PropertyGroup>
+      <_SpoitableZipStaging>$([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)'))module-zip\</_SpoitableZipStaging>
+      <SpoitableModulePackage>$([MSBuild]::EnsureTrailingSlash('$(SpoitableModulePackageDirectory)'))$(SpoitableModuleId)-$(Version)-module.zip</SpoitableModulePackage>
+    </PropertyGroup>
+
+    <!--
+      本体は、入口の dll を「*.deps.json と同じ名前の dll」で決める。名前を変える前の build の *.deps.json が出力に残っていると、
+      そちらが選ばれて読み込めなくなる。この build のもの 1 つだけであることを確かめる。
+    -->
+    <ItemGroup Condition="'$(_SpoitableIsModule)' == 'true'">
+      <_SpoitableDepsFile Include="$(TargetDir)*.deps.json" />
+      <_SpoitableStrayDepsFile Include="@(_SpoitableDepsFile)" Condition="'%(Filename)%(Extension)' != '$(TargetName).deps.json'" />
+    </ItemGroup>
+
+    <Error Code="STK021"
+           Condition="'$(_SpoitableIsModule)' == 'true' and '@(_SpoitableStrayDepsFile)' != ''"
+           Text="$(MSBuildProjectName): the output folder has a *.deps.json that this build did not make (@(_SpoitableStrayDepsFile->'%(Filename)%(Extension)', ', ')). The app takes the dll named like the *.deps.json as the module, so a leftover from an earlier build under another name would be loaded instead of $(TargetFileName). Delete the bin and obj folders and build again." />
+
+    <Error Code="STK022"
+           Condition="'$(_SpoitableIsModule)' == 'true' and (!Exists('$(TargetDir)$(TargetName).deps.json') or !Exists('$(TargetDir)$(TargetFileName)'))"
+           Text="$(MSBuildProjectName): the output folder has no $(TargetFileName) with its $(TargetName).deps.json. The app finds the module's dll by that pair. Do not turn off GenerateDependencyFile, and build the project as a class library." />
+
+    <ItemGroup Condition="'$(_SpoitableIsModule)' == 'true'">
+      <_SpoitableZipFile Include="$(TargetDir)**\*" Exclude="$(TargetDir)**\*.pdb;$(TargetDir).remove;$(TargetDir).disabled;$(TargetDir).source.json" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(_SpoitableIsLibrary)' == 'true'">
+      <_SpoitableLibraryDll Include="$(TargetDir)*.dll;$(TargetDir)shared\*.dll" />
+      <_SpoitableLibraryNestedDll Include="$(TargetDir)**\*.dll" Exclude="@(_SpoitableLibraryDll)" />
+    </ItemGroup>
+
+    <!-- ライブラリの zip に入るのは直下と shared/ の dll だけ。その下の dll（native の runtimes\…・文化ごとのフォルダ）を黙って落とさない。 -->
+    <Error Code="STK024"
+           Condition="'@(_SpoitableLibraryNestedDll)' != ''"
+           Text="$(MSBuildProjectName): the output folder has dlls below a sub-folder (@(_SpoitableLibraryNestedDll->'%(RecursiveDir)%(Filename)%(Extension)', ', ')). A library's zip carries module.json and the dlls for shared/ only, and the app loads only the dlls right in shared/, so these would be left out and missing when the library is used. A library cannot ship native or translated dlls." />
+
+    <!-- 前の回のものを残さない（残すと、もう出力に無いファイルが zip に入る）。 -->
+    <RemoveDir Directories="$(_SpoitableZipStaging)" />
+    <Copy SourceFiles="@(_SpoitableZipFile)" DestinationFiles="@(_SpoitableZipFile->'$(_SpoitableZipStaging)%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy Condition="'$(_SpoitableIsLibrary)' == 'true'" SourceFiles="$(TargetDir)module.json" DestinationFolder="$(_SpoitableZipStaging)" />
+    <Copy Condition="'$(_SpoitableIsLibrary)' == 'true'" SourceFiles="@(_SpoitableLibraryDll)" DestinationFolder="$(_SpoitableZipStaging)shared" />
+
+    <MakeDir Directories="$(SpoitableModulePackageDirectory)" />
+    <ZipDirectory SourceDirectory="$(_SpoitableZipStaging)" DestinationFile="$(SpoitableModulePackage)" Overwrite="true" />
+    <RemoveDir Directories="$(_SpoitableZipStaging)" />
+
+    <Message Importance="high" Text="$(MSBuildProjectName) -&gt; $(SpoitableModulePackage)" />
+  </Target>
+
+</Project>
