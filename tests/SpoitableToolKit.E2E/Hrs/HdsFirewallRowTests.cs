@@ -205,40 +205,59 @@ public sealed class HdsFirewallRowTests(HdsFirewallAppFixture app) : IClassFixtu
     }
 
     /// <summary>
-    /// 一部だけ入った「適用」（本体の値は入り、hrs は範囲外の値で丸ごと断られた）のあと、画面は残した溜めで描き直す。
-    /// 打ち替えたポートも残るので、行はボタンではなく「変更を適用すると使えます」のまま（前のポートの話でボタンを出さない）。
+    /// 値ごとに断られた「適用」（入った値と、モジュールに断られた値がある）のあと、画面は断られた値だけを溜めに残して描き直す。
+    /// 残った中に前提の設定（ポート）があれば、描き直したあとも行は「変更を適用すると使えます」のまま（前のポートの話でボタンを出さない）。
+    /// <para>
+    /// 描き直すのは、本体の答えに「入った値」があるときだけ（<c>applied</c>。値ごとに断ったモジュールの分しか載らない）。
+    /// 同梱のモジュールで値ごとに断るのは hrs の心拍計の指定・パラメータ名・ゾーンだけで、ポートは断らない（hrs が値ごとに断るときは、ポートは入る）。
+    /// そこで、ポートをモジュールが断ったときに本体が返す答え（入った値と、断られた値の一言）を、画面の橋の口を 1 回だけ包んで作る。入る方の値は本物の口で入れる。
+    /// </para>
     /// </summary>
     [Fact]
-    public async Task AnApplyThatKeepsThePortEditStillAsksToApplyFirst()
+    public async Task APartlyRefusedApplyThatKeepsThePortStillAsksToApplyFirst()
     {
-        var confirm = Page.Locator("#viewSettings .cfg-group[data-module='host'] .cfg-item[data-key='ConfirmSeconds'] input[type=number]");
-        var before = await Page.EvaluateAsync<int>(
-            "() => JSON.parse(window.__stkConfigs.find(g => g.module === 'host').items.find(i => i.key === 'ConfirmSeconds').value)");
+        var seconds = Item("Hds.NoSignalSeconds").Locator("input[type=number]");
+        var before = await seconds.InputValueAsync();
 
         try
         {
-            await app.SettingsPage("notify").ClickAsync();
-            await confirm.FillAsync((before == 600 ? before - 1 : before + 1).ToString());
-
-            await app.SettingsPage("hrs").ClickAsync();
+            await seconds.FillAsync(before == "60" ? "61" : "60");
             await Item("Hds.Port").Locator("input[type=number]").FillAsync(AppFixture.FreePort().ToString());
-            await Item("Hds.NoSignalSeconds").Locator("input[type=number]").FillAsync("5");
             await Assertions.Expect(ApplyFirst).ToBeVisibleAsync();
+
+            await Page.EvaluateAsync(
+                """
+                () => {
+                  const real = window.__e2eRealApply = bridge.applyConfigChanges;
+                  bridge.applyConfigChanges = async json => {
+                    bridge.applyConfigChanges = real;
+                    const changes = JSON.parse(json);
+                    delete changes.hrs['Hds.Port'];
+                    const reply = await real(JSON.stringify(changes));
+                    return {
+                      ok: false,
+                      notes: [...reply.notes, { module: 'hrs', key: 'Hds.Port', message: 'e2e: refused by the module' }],
+                      applied: [...reply.applied, ...Object.keys(changes.hrs).map(key => ({ module: 'hrs', key }))],
+                    };
+                  };
+                }
+                """);
 
             await Page.Locator("#cfgCommit").ClickAsync();
 
-            // 本体の分は入り、hrs の分は断られて溜めに残った（範囲外の欄は赤く、ポートは「変更済み」のまま）。
-            await Assertions.Expect(Item("Hds.NoSignalSeconds")).ToHaveClassAsync(new Regex(@"\bbad\b"));
+            // 描き直された: 入った方は溜めから外れ、断られたポートだけが残った（赤く、「変更済み」のまま）。
+            await Assertions.Expect(Item("Hds.Port")).ToHaveClassAsync(new Regex(@"\bbad\b"));
             await Assertions.Expect(Item("Hds.Port")).ToHaveClassAsync(new Regex(@"\bdirty\b"));
-            await Assertions.Expect(Page.Locator("#cfgApply")).ToBeVisibleAsync();
+            await Assertions.Expect(Item("Hds.NoSignalSeconds")).Not.ToHaveClassAsync(new Regex(@"\bdirty\b"));
 
             await Assertions.Expect(ApplyFirst).ToBeVisibleAsync();
             await Assertions.Expect(Button).ToBeHiddenAsync();
         }
         finally
         {
+            await Page.EvaluateAsync("() => { if (window.__e2eRealApply) bridge.applyConfigChanges = window.__e2eRealApply; delete window.__e2eRealApply; }");
             if (await Page.Locator("#cfgApply").IsVisibleAsync()) await Page.Locator("#cfgCancel").ClickAsync();
-            await Page.EvaluateAsync("value => bridge.applyConfigChanges(JSON.stringify({ host: { ConfirmSeconds: value } }))", before);
+            await Page.EvaluateAsync("value => bridge.applyConfigChanges(JSON.stringify({ hrs: { 'Hds.NoSignalSeconds': value } }))", int.Parse(before));
         }
     }
 
