@@ -53,11 +53,15 @@ public sealed class HdsFirewallRowTests(HdsFirewallAppFixture app) : IClassFixtu
     private async Task ResetAsync(string firewall, string badge)
     {
         app.SetFirewall(firewall);
-        app.Port = HdsFirewallAppFixture.FreeLoopbackPort();
+        app.Port = AppFixture.FreePort();
         await Page.EvaluateAsync("port => bridge.applyConfigChanges(JSON.stringify({ hrs: { 'Hds.Port': port } }))", app.Port);
 
         await Assertions.Expect(Row.Locator(".cfg-action-detail")).ToContainTextAsync($"TCP {app.Port}");
         await Assertions.Expect(Badge).ToHaveTextAsync(badge);
+
+        // 適用のあとの読み直し（画面ごと描き直す）も済むまで待つ。答えは push で先に届くことがあり、そのあとで読み直しが行を差し替えると、
+        // 次に打った値が消える。ポートの欄を変えるのは読み直しだけ（push は動きの行しか触らない）。
+        await Assertions.Expect(Item("Hds.Port").Locator("input[type=number]")).ToHaveValueAsync(app.Port.ToString());
     }
 
     [Fact]
@@ -157,7 +161,7 @@ public sealed class HdsFirewallRowTests(HdsFirewallAppFixture app) : IClassFixtu
     {
         var port = Item("Hds.Port").Locator("input[type=number]");
         var before = app.Port;
-        var next = HdsFirewallAppFixture.FreeLoopbackPort();
+        var next = AppFixture.FreePort();
 
         await port.FillAsync(next.ToString());
         await Assertions.Expect(ApplyFirst).ToHaveTextAsync("変更を適用すると使えます");

@@ -869,8 +869,9 @@ public sealed class HrsTests
             Assert.Null(Row(host)!.Button);
             Assert.Equal(1, Volatile.Read(ref added));
             Assert.Contains("\"firewall\":\"present\"", Status(module));
-            Assert.All(calls.Seen, call => Assert.Equal(("hrs", "Hds.Firewall"), call));
+            await WaitFor(() => calls.Seen.Length > 0);
             Assert.NotEmpty(calls.Seen);
+            Assert.All(calls.Seen, call => Assert.Equal(("hrs", "Hds.Firewall"), call));
         }
         finally
         {
@@ -896,15 +897,17 @@ public sealed class HrsTests
         try
         {
             Assert.True(module.OnInit(host));
-            await WaitFor(() => Row(host)?.Detail == "hrs.panel.firewall.missing(3476)");
-            var before = calls.Seen.Length;
+
+            // 結んだとき・確認中・答えの 3 回。「変わった」は裏へ回してから届くので、答えが読めても数はまだ揃っていないことがある。
+            await WaitFor(() => calls.Seen.Length >= 3 && Row(host)?.Detail == "hrs.panel.firewall.missing(3476)");
+            Assert.Equal(3, calls.Seen.Length);
 
             Assert.Empty(Apply(host, """{ "Hds.Port": 4100 }"""));
-            await WaitFor(() => Row(host)?.Detail == "hrs.panel.firewall.missing(4100)");
+            await WaitFor(() => calls.Seen.Length >= 5 && Row(host)?.Detail == "hrs.panel.firewall.missing(4100)");
 
             Assert.Equal("hrs.panel.firewall.missing(4100)", Row(host)!.Detail);
             Assert.Equal(HdsFirewall.CommandFor(4100), Row(host)!.Copy);
-            Assert.True(calls.Seen.Length >= before + 2, $"確認中と答えの 2 回を流すはず（{calls.Seen.Length - before} 回）");
+            Assert.Equal(5, calls.Seen.Length);
         }
         finally
         {

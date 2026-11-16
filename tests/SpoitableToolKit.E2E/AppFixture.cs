@@ -483,8 +483,11 @@ public class AppFixture : IAsyncLifetime
         throw new TimeoutException($"{endpoint} に CDP が現れなかった");
     }
 
-    /// <summary>同じ番号を 2 つのアプリに渡すと、後の方は CDP を開けず試験は前の方のアプリへ繋がる。クラスごとのアプリは同じ瞬間に起動するので、一度渡した番号は二度と渡さない。</summary>
-    private static int FreePort()
+    /// <summary>
+    /// 同じ番号を 2 つのアプリに渡すと、後の方は CDP を開けず試験は前の方のアプリへ繋がる。クラスごとのアプリは同じ瞬間に起動するので、一度渡した番号は二度と渡さない。
+    /// アプリに待たせるほかの口（HDS など）の番号もここから取る（取らないと、別のクラスの CDP と重なりうる）。
+    /// </summary>
+    internal static int FreePort()
     {
         while (true)
         {
