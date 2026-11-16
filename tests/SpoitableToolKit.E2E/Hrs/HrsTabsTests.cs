@@ -148,6 +148,25 @@ public sealed class HrsTabsTests(AppFixture app) : IClassFixture<AppFixture>, IA
     }
 
     /// <summary>
+    /// 接続中の 1 台が広告をやめていると、C# は電波の強さを渡さず、時刻を「いま」にする（HrsMonitorListTests）。
+    /// その行は「接続中・たった今」で、dBm の欄を出さない（古い数字も「undefined dBm」も出さない）。
+    /// </summary>
+    [Fact]
+    public async Task AConnectedRowWithoutASignalShowsNoDbm()
+    {
+        await FreezeRender();
+        await AnswerMonitors("[{ name: 'Polar H10 1234', address: 'A0:9E:1A:00:00:01', lastSeen: ago(0), connected: true }]");
+
+        await Panel.Locator("#tabMonitors").ClickAsync();
+
+        var row = Rows.Nth(0);
+        await Assertions.Expect(row.Locator(".tag")).ToHaveTextAsync("接続中");
+        await Assertions.Expect(row.Locator(".seen")).ToHaveTextAsync("たった今");
+        await Assertions.Expect(row.Locator(".signal")).ToHaveCountAsync(0);
+        await Assertions.Expect(row).Not.ToContainTextAsync("dBm");
+    }
+
+    /// <summary>
     /// 広告はパネルへ push しないので、心拍計タブを開いている間はパネルが一覧を読み直す（答えるたびに電波の強さを変えて、描き直したのを見る）。
     /// 読むのは一覧だけの口で、記録を数える getStatus は呼ばない。ほかのタブへ移ったら止める。
     /// </summary>
