@@ -96,7 +96,7 @@ public sealed class HrsModule : ISpoitableModule, IConfigEventListener<HrsConfig
         _beats = new HeartBeatRecorder(_log, _config, () => _records, () => _source, () => _logger, _recordQuery, _announcer, PushStatus);
         _capture = new HeartRateCapture(this, () => _host, () => _source, () => _sessionEvents, _config, () => _logger, _beats, PushStatus);
         _panel = new HrsPanelStatus(_config, _log, () => _host, () => _source, () => _capture.Session, () => _broadcast, _firewall, _recordQuery, _export,
-            () => (Time ?? TimeProvider.System).GetUtcNow());
+            Now, new LanAddresses(() => (ReadNetworkCards ?? LanAddresses.ReadSystem)(), Now));
         _connections = new HeartRateConnectionWatch(() => _source, _log, _announcer, () => _logger);
         _broadcastRunner = new HrsBroadcastRunner(() => _broadcast, () => _logger);
     }
@@ -181,6 +181,14 @@ public sealed class HrsModule : ISpoitableModule, IConfigEventListener<HrsConfig
     /// <b>試験からはここを差し替える</b> — 時間を進めて「心拍なし」を起こす（本物の秒数を待たない）。
     /// </summary>
     internal TimeProvider? Time;
+
+    private DateTimeOffset Now() => (Time ?? TimeProvider.System).GetUtcNow();
+
+    /// <summary>
+    /// この PC のネットワークの口（パネルの「心拍計」タブの Apple Watch (HDS) の欄が、時計に入れる宛先を選ぶ元）。
+    /// <b>試験からはここを差し替える</b>（この PC の本当のアドレスに頼らない）。
+    /// </summary>
+    internal Func<IReadOnlyList<NetworkCard>>? ReadNetworkCards;
 
     /// <summary>
     /// 記録の置き場。<b>試験からはここを差し替える</b>（本物は DataDirectory に DB を作る）。

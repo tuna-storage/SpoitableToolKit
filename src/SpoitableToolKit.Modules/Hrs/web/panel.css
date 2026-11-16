@@ -100,8 +100,9 @@ select {
  * 幅が足りなければ横にはみ出さずに折り返す（VR の窓は字が 1.5 倍）。 */
 .pane-tabs { margin: 1em 0 0 -.75em; flex-wrap: wrap; }
 
-/* タブの直下の欄は、上の余白をタイルと同じにそろえる（section の 1.6em だとタブから離れすぎる）。 */
-.pane > section:first-child { margin-top: 1em; }
+/* タブの直下の欄は、上の余白をタイルと同じにそろえる（section の 1.6em だとタブから離れすぎる）。
+ * 先頭の欄が隠れているとき（HDS が OFF の心拍計タブ）は、次の欄が先頭。 */
+.pane > section:first-child, .pane > section.hidden:first-child + section { margin-top: 1em; }
 
 /* 統計 */
 .daynav { display: flex; align-items: center; gap: .4em; flex-wrap: wrap; margin-top: 1em; }
@@ -118,10 +119,11 @@ select {
 }
 .hint { margin-top: .4em; color: var(--faint); font-size: .75em; }
 
-/* OBS に貼る URL。**選んでコピーできる形**で出す（打ち直させない）。 */
+/* OBS に貼る URL と、時計に入れる宛先。**選んでコピーできる形**で出す（打ち直させない）。 */
 .urls { display: flex; flex-direction: column; gap: .4em; margin-top: .6em; }
 .url {
   display: flex; align-items: center; gap: .7em; padding: .4em .5em .4em .8em;
   border: 1px solid var(--border); border-radius: .45em; background: var(--surface);
 }
 .url code { flex: 1; font: .85em var(--font-mono); color: var(--fg); word-break: break-all; }
+.url .note { flex: none; color: var(--muted); font-size: .85em; white-space: nowrap; }

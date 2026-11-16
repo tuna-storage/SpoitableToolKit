@@ -27,7 +27,8 @@ internal sealed class HrsPanelStatus(
     HdsFirewallWatch firewall,
     HeartRateRecordQueryService records,
     HeartRateExportService export,
-    Func<DateTimeOffset> now)
+    Func<DateTimeOffset> now,
+    LanAddresses lan)
 {
     /// <summary>
     /// パネルへ現状を流す。開いていなければホストが捨てる（best-effort）ので、
@@ -51,10 +52,18 @@ internal sealed class HrsPanelStatus(
     public string Tile() => JsonSerializer.Serialize(TileState(), HrsPanelJson.Options);
 
     /// <summary>
-    /// 「心拍計」タブの一覧だけ（<c>getMonitors</c>）。タブを開いている間、パネルが数秒おきに読み直す — 広告は 1 秒に何通も来るので push しない。
-    /// <b>記録は数えない</b>（数秒おきに DB を数えるには重い）。
+    /// 「心拍計」タブの中身だけ（<c>getMonitors</c>）。タブを開いている間、パネルが数秒おきに読み直す — 広告は 1 秒に何通も来るので push しない。
+    /// <b>記録は数えない</b>（数秒おきに DB を数えるには重い）。HDS の宛先もここ（Wi-Fi を替えたら、次の読み直しで追いつく）。
     /// </summary>
-    public string Monitors() => JsonSerializer.Serialize(new HrsPanelMonitors(MonitorRows()), HrsPanelJson.Options);
+    public string Monitors() => JsonSerializer.Serialize(new HrsPanelMonitors(MonitorRows(), Hds()), HrsPanelJson.Options);
+
+    /// <summary>
+    /// 時計のアプリに入れる宛先（<c>IP:ポート</c>）。<b>HDS の受信が ON の間だけ</b>（OFF なら null = パネルは欄ごと隠す）。
+    /// ポートは入っている設定の値（変えると待ち受けも開き直す）。
+    /// </summary>
+    private HrsPanelHds? Hds() => config.Hds.Enabled
+        ? new HrsPanelHds([.. lan.Current.Select(address => new HrsPanelHdsAddress(address.Name, $"{address.Ip}:{config.Hds.Port}"))])
+        : null;
 
     private HrsPanelState Build()
     {

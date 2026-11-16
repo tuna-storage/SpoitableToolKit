@@ -36,6 +36,7 @@ public sealed class HrsTabsTests(AppFixture app) : IClassFixture<AppFixture>, IA
             async () => {
               if (window.__realRender) { render = window.__realRender; delete window.__realRender; }
               if (window.__realCall) { spoitable.call = window.__realCall; delete window.__realCall; }
+              delete window.__hds;
               render(await spoitable.call('getStatus'));
             }
             """);
@@ -56,6 +57,7 @@ public sealed class HrsTabsTests(AppFixture app) : IClassFixture<AppFixture>, IA
     /// <summary>
     /// 心拍計の一覧を読み直す口だけを包み、渡した JS の式（呼ばれるたびに評価する）で答える。呼ばれた口の名前は <c>__calls</c> に積む。
     /// 「〜前」は手元の時計で数えるので、時刻は呼ばれたときの <c>Date.now()</c> から作る。
+    /// Apple Watch (HDS) の欄は、そのとき <c>window.__hds</c> に置いてあるもの（置いていなければ HDS が OFF と同じ）。
     /// </summary>
     private Task AnswerMonitors(string rows) => Inside.EvaluateAsync(
         $$"""
@@ -68,7 +70,7 @@ public sealed class HrsTabsTests(AppFixture app) : IClassFixture<AppFixture>, IA
             if (method !== 'getMonitors') return window.__realCall(method, payload);
             const n = window.__answers++;
             const ago = seconds => new Date(Date.now() - seconds * 1000).toISOString();
-            return Promise.resolve({ discovered: {{rows}} });
+            return Promise.resolve({ discovered: {{rows}}, hds: window.__hds });
           };
         }
         """);
@@ -211,6 +213,70 @@ public sealed class HrsTabsTests(AppFixture app) : IClassFixture<AppFixture>, IA
         await Page.Locator("#sidebar .item[data-id='hrs']").ClickAsync();
         await frame.WaitForFunctionAsync("() => __monitors.watching", null, new FrameWaitForFunctionOptions { Timeout = 5_000 });
         await Assertions.Expect(Rows.Nth(0).Locator(".signal")).Not.ToHaveTextAsync(hidden!, new() { Timeout = 2_000 });
+    }
+
+    /// <summary>
+    /// Apple Watch (HDS) の欄は、HDS の受信が ON の間だけ（C# が getMonitors に hds を載せる間だけ。載せるかは HrsMonitorListTests）。
+    /// 宛先ごとに口の名前を添え、ON のままアドレスが無ければ 1 行の案内。OFF にしたら、次の読み直しで隠れる。
+    /// e2e のアプリでは本物の HDS を ON にしない（0.0.0.0 で待ち受けて、ファイアウォールの確認が出ることがある）。
+    /// </summary>
+    [Fact]
+    public async Task TheWatchAddressesShowOnlyWhileHdsIsOn()
+    {
+        await FreezeRender();
+        await AnswerMonitors("[]");
+        await Inside.EvaluateAsync(
+            "() => { window.__hds = { addresses: [{ name: 'Wi-Fi', endpoint: '192.168.1.20:3476' }, { name: 'Ethernet 2', endpoint: '10.0.0.5:3476' }] }; }");
+
+        await Panel.Locator("#tabMonitors").ClickAsync();
+        await Assertions.Expect(Panel.Locator("#hds")).ToBeVisibleAsync();
+        await Assertions.Expect(Panel.Locator("#hdsAddresses .url code")).ToHaveTextAsync(["192.168.1.20:3476", "10.0.0.5:3476"]);
+        await Assertions.Expect(Panel.Locator("#hdsAddresses .url .note")).ToHaveTextAsync(["Wi-Fi", "Ethernet 2"]);
+
+        await Inside.EvaluateAsync("() => { window.__hds = undefined; }");
+        await Assertions.Expect(Panel.Locator("#hds")).ToBeHiddenAsync(new() { Timeout = 10_000 });
+
+        await Inside.EvaluateAsync("() => { window.__hds = { addresses: [] }; }");
+        await Assertions.Expect(Panel.Locator("#hds")).ToBeVisibleAsync(new() { Timeout = 10_000 });
+        await Assertions.Expect(Panel.Locator("#hdsAddresses"))
+            .ToHaveTextAsync(await Inside.EvaluateAsync<string>("() => spoitable.t('hrs.panel.hds.none')"));
+    }
+
+    /// <summary>
+    /// 「コピー」で <c>IP:ポート</c> がクリップボードに入る。e2e のアプリのクリップボードはアプリの中だけにあり、試験から直に読む口は無いので、
+    /// 別のパネル（動画 URL）の欄へ右クリックのメニューから貼って見る。
+    /// </summary>
+    [Fact]
+    public async Task CopyingAWatchAddressPutsItOnTheClipboard()
+    {
+        await FreezeRender();
+        await AnswerMonitors("[]");
+        await Inside.EvaluateAsync("() => { window.__hds = { addresses: [{ name: 'Wi-Fi', endpoint: '192.168.1.20:3476' }] }; }");
+
+        await Panel.Locator("#tabMonitors").ClickAsync();
+        var copy = Panel.Locator("#hdsAddresses .url button");
+        await copy.ClickAsync();
+        await Assertions.Expect(copy).ToHaveTextAsync("コピーしました");
+
+        await Page.Locator("#sidebar .item[data-id='videourl']").ClickAsync();
+        var url = Page.FrameLocator("iframe.view[data-id='videourl']").Locator("#url");
+        await Assertions.Expect(url).ToBeVisibleAsync(new() { Timeout = 20_000 });
+
+        try
+        {
+            await url.FillAsync("");
+
+            var turns = await Page.EvaluateAsync<int>("() => window.__stkCtx?.turns ?? 0");
+            await url.ClickAsync(new() { Button = MouseButton.Right });
+            await Page.WaitForFunctionAsync($"() => (window.__stkCtx?.turns ?? 0) > {turns}");
+            await Page.Locator("#ctxMenu button[data-id='host paste']").ClickAsync();
+
+            await Assertions.Expect(url).ToHaveValueAsync("192.168.1.20:3476");
+        }
+        finally
+        {
+            await url.FillAsync("");
+        }
     }
 
     /// <summary>区切り: 10 秒未満は「たった今」、1 分未満は秒、1 時間未満は分、その先は時間。C# が書く時刻（小数 7 桁）も読める。</summary>

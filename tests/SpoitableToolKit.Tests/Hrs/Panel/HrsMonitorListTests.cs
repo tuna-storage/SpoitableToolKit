@@ -1,5 +1,9 @@
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Text.Json;
 using SpoitableToolKit.Modules.Hrs;
+using SpoitableToolKit.Modules.Hrs.Config;
+using SpoitableToolKit.Modules.Hrs.Devices.Hds;
 using SpoitableToolKit.Modules.Hrs.Devices.Interfaces;
 using SpoitableToolKit.Modules.Hrs.Devices.Models;
 using SpoitableToolKit.Tests.Fakes;
@@ -154,6 +158,47 @@ public sealed class HrsMonitorListTests
                 new Row("Polar", "A0:9E:1A:00:00:01", null, At.ToString("O"), true),
                 new Row("Polar H10 1234", "A0:9E:1A:00:00:02", null, null, false),
             ], rows);
+        }
+        finally
+        {
+            module.OnShutdown();
+        }
+    }
+
+    /// <summary>
+    /// 時計（HDS）に入れる宛先は、HDS の受信が ON の間だけ渡す（OFF なら書かない = パネルは欄ごと隠す）。宛先は LAN のアドレスと、入っている設定のポート。
+    /// 口は試験で並べる（この PC の本当のアドレスに頼らない）。ファイアウォールは見に行かない（HDS を ON にすると調べに行くため）。
+    /// </summary>
+    [Fact]
+    public async Task TheWatchAddressesAreListedOnlyWhileHdsIsOn()
+    {
+        var module = new HrsModule
+        {
+            CreateSources = () => [new SeenSource(Belt)],
+            Time = new Clock(At),
+            CheckFirewall = () => HdsFirewall.State.Present,
+            ReadNetworkCards = () =>
+            [
+                new NetworkCard("Wi-Fi", OperationalStatus.Up, NetworkInterfaceType.Wireless80211, [IPAddress.Parse("192.168.1.20")], [IPAddress.Parse("192.168.1.1")]),
+            ],
+        };
+        var config = (HrsConfig)module.Config!;
+        config.Hds.Enabled = true;
+        config.Hds.Port = 4321;
+        Assert.True(module.OnInit(new FakeModuleHost().WithConfig("hrs", module.Config!)));
+        try
+        {
+            using (var on = JsonDocument.Parse(await module.HandleUiCallAsync("getMonitors", "")))
+            {
+                var address = Assert.Single(on.RootElement.GetProperty("hds").GetProperty("addresses").EnumerateArray());
+                Assert.Equal("Wi-Fi", address.GetProperty("name").GetString());
+                Assert.Equal("192.168.1.20:4321", address.GetProperty("endpoint").GetString());
+            }
+
+            config.Hds.Enabled = false;
+
+            using var off = JsonDocument.Parse(await module.HandleUiCallAsync("getMonitors", ""));
+            Assert.False(off.RootElement.TryGetProperty("hds", out _));
         }
         finally
         {

@@ -104,6 +104,12 @@
 
 <!-- 心拍計。見えている心拍計（心拍サービスを名乗る広告を出しているものだけ）。開いている間は数秒おきに読み直す（watchMonitors）。 -->
 <div class="pane hidden" id="paneMonitors" role="tabpanel" aria-labelledby="tabMonitors">
+  <!-- Apple Watch (HDS)。受信が ON の間だけ（C# が getMonitors で渡す）。時計のアプリに入れる「IP:ポート」を、選んでコピーできる形で。 -->
+  <section class="hidden" id="hds">
+    <h2 data-i18n="hrs.panel.hds.title"></h2>
+    <div class="empty" data-i18n="hrs.panel.hds.hint"></div>
+    <div class="urls" id="hdsAddresses"></div>
+  </section>
   <section>
     <h2 data-i18n="hrs.panel.devices.title"></h2>
     <div class="devices" id="devices"></div>
@@ -149,6 +155,8 @@ const el = {
   wsState: document.getElementById('wsState'),
   overlays: document.getElementById('overlays'),
   urls: document.getElementById('urls'),
+  hds: document.getElementById('hds'),
+  hdsAddresses: document.getElementById('hdsAddresses'),
   recordState: document.getElementById('recordState'),
   range: document.getElementById('range'),
   export: document.getElementById('export'),
@@ -258,27 +266,59 @@ function renderBroadcast(status) {
   el.overlays.classList.toggle('hidden', !listening);
   if (!listening) return;
 
-  el.urls.replaceChildren(...(status.overlays ?? []).map(name => {
-    const url = `http://localhost:${status.wsPort}/overlay/${name}`;
+  el.urls.replaceChildren(...(status.overlays ?? []).map(name => copyRow(`http://localhost:${status.wsPort}/overlay/${name}`)));
+}
 
-    const row = document.createElement('div');
-    row.className = 'url';
+/// 選んでコピーできる 1 行（OBS の URL・時計に入れる宛先）。打ち直させない。note はどれかを見分ける添え書き（口の名前など）。
+function copyRow(text, note) {
+  const row = document.createElement('div');
+  row.className = 'url';
 
-    const code = document.createElement('code');
-    code.textContent = url;
-    row.appendChild(code);
+  const code = document.createElement('code');
+  code.textContent = text;
+  row.appendChild(code);
 
-    const copy = document.createElement('button');
-    copy.textContent = spoitable.phrases.ui.copy;
-    copy.addEventListener('click', () => {
-      spoitable.copyToClipboard(url);
-      copy.textContent = spoitable.phrases.ui.copied;
-      setTimeout(() => { copy.textContent = spoitable.phrases.ui.copy; }, 1500);
-    });
-    row.appendChild(copy);
+  if (note) {
+    const label = document.createElement('span');
+    label.className = 'note';
+    label.textContent = note;
+    row.appendChild(label);
+  }
 
-    return row;
-  }));
+  const copy = document.createElement('button');
+  copy.textContent = spoitable.phrases.ui.copy;
+  copy.addEventListener('click', () => {
+    spoitable.copyToClipboard(text);
+    copy.textContent = spoitable.phrases.ui.copied;
+    setTimeout(() => { copy.textContent = spoitable.phrases.ui.copy; }, 1500);
+  });
+  row.appendChild(copy);
+
+  return row;
+}
+
+/// Apple Watch (HDS) の欄。受信が ON の間だけ C# が渡す（無ければ欄ごと隠す）。時計のアプリに入れる「IP:ポート」に、どの口のアドレスかを添える。
+/// 中身が変わったときだけ描き直す — 数秒おきに作り直すと、押したボタンの「コピーしました」が途中で消える。
+let hdsDrawn = '';
+
+function renderHds(hds) {
+  el.hds.classList.toggle('hidden', !hds);
+
+  const drawn = hds ? JSON.stringify(hds) : '';
+  if (drawn === hdsDrawn) return;
+  hdsDrawn = drawn;
+  if (!hds) return;
+
+  const addresses = hds.addresses ?? [];
+  if (!addresses.length) {
+    const none = document.createElement('div');
+    none.className = 'empty';
+    none.textContent = spoitable.t('hrs.panel.hds.none');
+    el.hdsAddresses.replaceChildren(none);
+    return;
+  }
+
+  el.hdsAddresses.replaceChildren(...addresses.map(address => copyRow(address.endpoint, address.name)));
 }
 
 /// 記録。件数は毎拍数えていないので、パネルを開いた時と書き出した後に取り直される。
@@ -454,7 +494,11 @@ function watchMonitors() {
 
 function readMonitors() {
   spoitable.call('getMonitors')
-    .then(result => { if (activeTab === 'monitors') renderDevices(result?.discovered ?? []); })
+    .then(result => {
+      if (activeTab !== 'monitors') return;
+      renderHds(result?.hds);
+      renderDevices(result?.discovered ?? []);
+    })
     .catch(err => console.error('心拍計の一覧を読めなかった', err));
 }
 
