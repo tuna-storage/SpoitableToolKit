@@ -103,6 +103,9 @@ internal sealed class HrsPanelStatus(
             WsError = server?.Error,
             WsClients = server?.Clients ?? 0,
             Overlays = HrsBroadcastServer.Overlays,
+            OverlayFeed = server?.Latest is { } sent
+                ? new HrsPanelOverlayFeed(sent.Number, HrsBroadcastMessage.Of(sent.State, HrsBroadcastMessage.Update, history: null))
+                : null,
         };
     }
 

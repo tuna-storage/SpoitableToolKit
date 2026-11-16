@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SpoitableToolKit.Host.Events;
 using SpoitableToolKit.Modules.Hrs;
 using SpoitableToolKit.Modules.Hrs.Avatar;
+using SpoitableToolKit.Modules.Hrs.Broadcast;
 using SpoitableToolKit.Modules.Hrs.Config;
 using SpoitableToolKit.Modules.Hrs.Devices.Ble;
 using SpoitableToolKit.Modules.Hrs.Devices.Hds;
@@ -758,6 +759,46 @@ public sealed class HrsTests
 
     private static string Status(HrsModule module) =>
         module.HandleUiCallAsync("getStatus", "{}").GetAwaiter().GetResult();
+
+    /// <summary>
+    /// 配信タブのプレビューは、配信が最後に流した 1 通をパネル経由で受ける。形は WebSocket の 1 通そのまま（オーバーレイが同じ受け口で読む）で、
+    /// <b>配信を切っていても</b>作っている（ここでは配信は OFF）。切れたら「繋がっていない」の 1 通に替わり、何通目かが進む
+    /// （パネルは番号が変わったときだけプレビューへ渡す）。
+    /// </summary>
+    [Fact]
+    public async Task ThePanelCarriesTheLastBroadcastMessageForThePreviewsEvenWhileBroadcastingIsOff()
+    {
+        var (module, host, source) = NewModule();
+        try
+        {
+            Assert.False(((HrsConfig)module.Config!).Broadcast.Enabled);
+            await WaitFor(() => host.Osc.Last("/avatar/parameters/HR") is 72);
+
+            long sent;
+            using (var beating = JsonDocument.Parse(Status(module)))
+            {
+                var feed = beating.RootElement.GetProperty("overlayFeed");
+                sent = feed.GetProperty("sent").GetInt64();
+                var zone = HrsZones.Of((HrsConfig)module.Config!, 72);
+                Assert.Equal(
+                    $$"""{"type":"hr_update","bpm":72,"zone":"{{zone}}","connected":true,"avg":72,"min":72,"max":72,"device":"Fake"}""",
+                    feed.GetProperty("latest").GetRawText());
+            }
+
+            source.Drop();
+            await WaitFor(() => Status(module).Contains("\"connected\":false,\"avg\"", StringComparison.Ordinal));
+
+            using var dropped = JsonDocument.Parse(Status(module));
+            var after = dropped.RootElement.GetProperty("overlayFeed");
+            Assert.False(after.GetProperty("latest").GetProperty("connected").GetBoolean());
+            Assert.Equal(0, after.GetProperty("latest").GetProperty("bpm").GetInt32());
+            Assert.True(after.GetProperty("sent").GetInt64() > sent);
+        }
+        finally
+        {
+            module.OnShutdown();
+        }
+    }
 
     // 手首のタイルに描く心拍。押すとパネルを開き、ページは同梱の web/tile.html。getHeartRate は記録を数えない軽い口で、push（status）と同じ名前で今の心拍と線の分を返す。
     [Fact]

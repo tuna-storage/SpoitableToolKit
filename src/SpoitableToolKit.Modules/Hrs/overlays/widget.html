@@ -81,5 +81,11 @@ function connect() {
   ws.onmessage = e => apply(JSON.parse(e.data));
   ws.onclose = () => { offline(); setTimeout(connect, 2000); };
 }
-connect();
+// パネルの配信タブのプレビュー（パネルと同じ origin の spoitable://hrs/overlays/<名前>.html?preview）。WebSocket は開かず、
+// パネルが中継する同じ形の 1 通を受ける。受けるのは親（パネル）から、同じ origin のものだけ。OBS が開く http://localhost の頁はここに入らない。
+if (location.protocol === 'spoitable:' && p.has('preview')) {
+  addEventListener('message', e => { if (e.source === parent && e.origin === location.origin && e.data) apply(e.data); });
+} else {
+  connect();
+}
 </script></body></html>

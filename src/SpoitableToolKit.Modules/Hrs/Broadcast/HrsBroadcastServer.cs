@@ -55,8 +55,16 @@ internal sealed class HrsBroadcastServer(
 
     private readonly ConcurrentDictionary<Guid, Client> _clients = new();
 
-    /// <summary>最後に流した内容。<b>後から繋いだ相手へ渡す</b>ので持っておく。</summary>
-    private HrsBroadcastState? _last;
+    /// <summary>最後に流した内容と何通目か。<b>後から繋いだ相手へ渡す</b>ので持っておく。待ち受けていなくても持つ（パネルのプレビューが読む）。</summary>
+    private HrsBroadcastSent? _last;
+
+    private long _sent;
+
+    /// <summary>
+    /// 最後に流した内容と何通目か（まだ 1 通も無ければ null）。<b>待ち受けていなくても</b>流した中身は持っているので、
+    /// パネルの配信タブのプレビューは配信を切っていても OBS と同じものを見せられる。
+    /// </summary>
+    public HrsBroadcastSent? Latest => _last;
 
     public HrsBroadcastStatus Status { get; private set; } = HrsBroadcastStatus.Disabled;
 
@@ -84,11 +92,11 @@ internal sealed class HrsBroadcastServer(
     /// </summary>
     public void Publish(HrsBroadcastState state)
     {
-        _last = state;
+        _last = new HrsBroadcastSent(state, Interlocked.Increment(ref _sent));
 
         if (_clients.IsEmpty) return;
 
-        var json = Serialize(state, "hr_update", withHistory: false);
+        var json = Serialize(state, HrsBroadcastMessage.Update, withHistory: false);
         foreach (var client in _clients.Values) client.Outbox.Writer.TryWrite(json);
     }
 
@@ -193,8 +201,8 @@ internal sealed class HrsBroadcastServer(
                 {
                     status = "ok",
                     clients = Clients,
-                    connected = _last?.Connected ?? false,
-                    bpm = _last?.HeartRate ?? 0,
+                    connected = _last?.State.Connected ?? false,
+                    bpm = _last?.State.HeartRate ?? 0,
                 }, Json)).ConfigureAwait(false);
                 return;
             }
@@ -280,7 +288,7 @@ internal sealed class HrsBroadcastServer(
             context.Request.RemoteEndPoint, _clients.Count);
 
         if (_last is { } last)
-            client.Outbox.Writer.TryWrite(Serialize(last, "welcome", withHistory: true));
+            client.Outbox.Writer.TryWrite(Serialize(last.State, HrsBroadcastMessage.Welcome, withHistory: true));
 
         try
         {
@@ -317,23 +325,8 @@ internal sealed class HrsBroadcastServer(
     /// <c>welcome</c> にだけ直近の心拍を付ける。オーバーレイは <c>d.history</c> を読む枝を持っているので、
     /// 付けないとグラフが埋まるまで 1 分かかる。
     /// </para>
-    private string Serialize(HrsBroadcastState state, string type, bool withHistory)
-    {
-        var recent = withHistory ? history?.Invoke() : null;
-
-        return JsonSerializer.Serialize(new
-        {
-            type,
-            bpm = state.HeartRate,
-            zone = state.Zone,
-            connected = state.Connected,
-            avg = state.Avg,
-            min = state.Min,
-            max = state.Max,
-            device = state.Device,
-            history = recent is { Count: > 0 } ? recent : null,
-        }, Json);
-    }
+    private string Serialize(HrsBroadcastState state, string type, bool withHistory) =>
+        JsonSerializer.Serialize(HrsBroadcastMessage.Of(state, type, withHistory ? history?.Invoke() : null), Json);
 
     /// <summary>
     /// 繋がっている相手 1 つ。<b>送る係と受ける係を分ける</b> —

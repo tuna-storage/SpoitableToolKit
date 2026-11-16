@@ -36,6 +36,11 @@
          自分の置き場所を辿れない。ファイルで配るならホストから場所を貰う話になるが、
          それはテーマをディレクトリで差し替えられるようにするときにまとめてやる。 -->
     <EmbeddedResource Include="overlays\*.html" />
+
+    <!-- 同じファイルをパネルの web/overlays/ にも配る（写しを持たない）。配信タブのプレビューが、パネルと同じ origin
+         （spoitable://hrs/overlays/<名前>.html?preview）で開く — パネルからは http://localhost を開けない（Chromium の Local Network Access）。
+         OBS が開く頁と HTML も CSS も同じになる。 -->
+    <None Update="overlays\*.html" Link="web\overlays\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

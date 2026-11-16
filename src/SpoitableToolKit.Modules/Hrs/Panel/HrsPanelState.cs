@@ -69,4 +69,9 @@ internal sealed record HrsPanelState
     public required int WsClients { get; init; }
 
     public required string[] Overlays { get; init; }
+
+    /// <summary>
+    /// 配信タブのプレビューへ中継する、最後に配信した 1 通。<b>配信を切っていても作っている</b>（OBS が開いたら見えるものと同じ）。まだ 1 通も無ければ null。
+    /// </summary>
+    public required HrsPanelOverlayFeed? OverlayFeed { get; init; }
 }

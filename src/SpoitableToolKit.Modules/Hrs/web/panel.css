@@ -127,3 +127,25 @@ select {
 }
 .url code { flex: 1; font: .85em var(--font-mono); color: var(--fg); word-break: break-all; }
 .url .note { flex: none; color: var(--muted); font-size: .85em; white-space: nowrap; }
+
+/* オーバーレイのカード。幅があれば 2 列、狭い窓では 1 列（URL が折り返さない幅）。 */
+.overlays { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(24em, 100%), 1fr)); gap: .7em; margin-top: .6em; }
+.overlay {
+  display: flex; flex-direction: column; gap: .3em; padding: .6em;
+  border: 1px solid var(--border); border-radius: .55em; background: var(--surface);
+}
+.overlay-name { margin-top: .2em; font-size: .9em; font-weight: 600; }
+.overlay-desc { color: var(--muted); font-size: .8em; }
+.overlay .url { margin-top: .3em; background: var(--bg); }
+
+/* プレビュー。市松模様で透けている所が分かる。オーバーレイを 800×500 で開いて 0.35 倍に縮め、枠からはみ出た分は切る。押せない（OBS の見本でしかない）。 */
+.preview {
+  position: relative; display: flex; align-items: center; justify-content: center; height: 100px; overflow: hidden;
+  border-radius: .45em;
+  background: repeating-conic-gradient(var(--bg) 0% 25%, color-mix(in srgb, var(--fg) 6%, var(--bg)) 0% 50%) 50% / 10px 10px;
+}
+/* color-scheme は頁（何も宣言していない = normal）と合わせる。違うと Chromium が iframe の後ろを不透明に塗り、透けて見えない。 */
+.preview iframe {
+  position: absolute; left: 50%; top: 50%; width: 800px; height: 500px; border: 0; background: transparent; color-scheme: normal;
+  transform: translate(-50%, -50%) scale(.35); pointer-events: none;
+}

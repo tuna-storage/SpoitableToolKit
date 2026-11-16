@@ -117,14 +117,15 @@
   </section>
 </div>
 
-<!-- 配信。待ち受けの様子と、OBS に貼る URL（待ち受けている間だけ）。 -->
+<!-- 配信。待ち受けの様子と、オーバーレイ 1 つにつき 1 枚のカード（プレビュー・名前・説明と大きさ・OBS に貼る URL）。
+     プレビューは OBS と同じ頁をパネルと同じ origin で開き、このタブが見えている間だけ動かす（syncPreviews）。配信を切っていても出す。 -->
 <div class="pane hidden" id="paneBroadcast" role="tabpanel" aria-labelledby="tabBroadcast">
   <section>
     <div class="empty" id="wsState"></div>
   </section>
-  <section class="hidden" id="overlays">
+  <section id="overlays">
     <h2 data-i18n="hrs.panel.ws.overlays"></h2>
-    <div class="urls" id="urls"></div>
+    <div class="overlays" id="urls"></div>
   </section>
 </div>
 
@@ -153,7 +154,6 @@ const el = {
   firewallCommand: document.getElementById('firewallCommand'),
   addRule: document.getElementById('addRule'),
   wsState: document.getElementById('wsState'),
-  overlays: document.getElementById('overlays'),
   urls: document.getElementById('urls'),
   hds: document.getElementById('hds'),
   hdsAddresses: document.getElementById('hdsAddresses'),
@@ -263,10 +263,119 @@ function renderBroadcast(status) {
       ? spoitable.t('hrs.panel.ws.listening', status.wsPort, status.wsClients | 0)
       : spoitable.t('hrs.panel.ws.failed', status.wsPort, status.wsError || '');
 
-  el.overlays.classList.toggle('hidden', !listening);
-  if (!listening) return;
+  // カードは並び・ポートが変わったときだけ作り直す。push は毎拍来るので、毎回作るとプレビューの iframe が毎秒読み直しになる。
+  const names = status.overlays ?? [];
+  const drawn = JSON.stringify([names, status.wsPort]);
+  if (drawn !== broadcast.drawn) {
+    broadcast.drawn = drawn;
+    el.urls.replaceChildren(...names.map(name => overlayCard(name, `http://localhost:${status.wsPort}/overlay/${name}`)));
+  }
 
-  el.urls.replaceChildren(...(status.overlays ?? []).map(name => copyRow(`http://localhost:${status.wsPort}/overlay/${name}`)));
+  // プレビューへ中継する分（配信が最後に流した 1 通）。配信を切っていても C# は作っている。
+  // 開いた直後に渡す welcome の直近の心拍は、配信と同じくグラフから 0 を除いたもの。
+  broadcast.feed = status.overlayFeed ?? null;
+  broadcast.history = (status.samples ?? []).map(sample => sample.bpm).filter(bpm => bpm > 0);
+
+  syncPreviews();
+  feedPreviews();
+}
+
+// オーバーレイの見本。名前は製品名のまま（訳さない）、説明は訳す。大きさは OBS のブラウザソースに入れる幅×高さ。
+const OVERLAY_INFO = {
+  pill: { name: 'Pill Badge', desc: 'hrs.panel.overlays.pill', size: '400×112' },
+  glass: { name: 'Glass Card', desc: 'hrs.panel.overlays.glass', size: '600×260' },
+  neon: { name: 'Neon Ring', desc: 'hrs.panel.overlays.neon', size: '384×384' },
+  widget: { name: 'Full Widget', desc: 'hrs.panel.overlays.widget', size: '680×320' },
+};
+
+/// 最後に作ったカードの印と、プレビューへ中継する分（最後の 1 通と何通目か・直近の心拍・最後に渡した番号）。
+const broadcast = { drawn: '', feed: null, history: [], fed: 0 };
+
+/// オーバーレイ 1 つのカード: プレビューの枠・名前・説明と大きさ・OBS に貼る URL（コピーのボタン付き）。プレビューの中身は syncPreviews が入れる。
+function overlayCard(name, url) {
+  const info = OVERLAY_INFO[name] ?? { name, desc: '', size: '' };
+
+  const card = document.createElement('div');
+  card.className = 'overlay';
+  card.dataset.overlay = name;
+
+  const preview = document.createElement('div');
+  preview.className = 'preview';
+  card.appendChild(preview);
+
+  const title = document.createElement('div');
+  title.className = 'overlay-name';
+  title.textContent = info.name;
+  card.appendChild(title);
+
+  const about = document.createElement('div');
+  about.className = 'overlay-desc';
+  about.textContent = [info.desc && spoitable.t(info.desc), info.size].filter(Boolean).join(' · ');
+  card.appendChild(about);
+
+  card.appendChild(copyRow(url));
+  return card;
+}
+
+/// プレビューの iframe の行き先。OBS が開くのと同じ頁を、**パネルと同じ origin** で開く（パネルからは http://localhost を開けない — Chromium の Local Network Access）。
+/// `preview` の印が付いていると、頁は WebSocket を開かずに、このパネルからの 1 通を受ける。
+function previewSrc(name) {
+  return `/overlays/${encodeURIComponent(name)}.html?preview`;
+}
+
+/// プレビューへ 1 通渡す。頁は、同じ origin の親（このパネル）からの 1 通だけを受ける。
+function postToPreview(frame, message) {
+  frame.contentWindow?.postMessage(message, location.origin);
+}
+
+/// 開いた直後に渡す 1 通（配信の welcome と同じ形: いまの様子と直近の心拍）。まだ 1 通も流していなければ渡さない（OBS も同じ）。
+function welcomeMessage() {
+  const feed = broadcast.feed;
+  if (!feed) return null;
+
+  return broadcast.history.length
+    ? { ...feed.latest, type: 'welcome', history: broadcast.history }
+    : { ...feed.latest, type: 'welcome' };
+}
+
+/// 配信が新しい 1 通を流したら（何通目かが変わったら）、開いているプレビューへ渡す。
+/// push は毎拍のほかにも来るので、同じ 1 通は渡し直さない（グラフに同じ点が積もる）。
+function feedPreviews() {
+  const feed = broadcast.feed;
+  if (!feed || feed.sent === broadcast.fed) return;
+
+  broadcast.fed = feed.sent;
+  for (const frame of el.urls.querySelectorAll('.preview iframe')) postToPreview(frame, feed.latest);
+}
+
+/// ライブのプレビュー（オーバーレイそのものを縮めて iframe で見せる）は、配信タブを開いていて、パネルも窓も見えている間だけ。
+/// オーバーレイは動き続けるので、4 枚の iframe を出しっぱなしにすると CPU と GPU を食う。条件を外れたら iframe ごと外す。
+/// 配信を切っていても出す（C# は流す中身を作っているので、OBS で開いたら見えるものと同じ）。
+function syncPreviews() {
+  const live = activeTab === 'broadcast' && panelShown && !document.hidden;
+
+  for (const card of el.urls.querySelectorAll('.overlay')) {
+    const box = card.querySelector('.preview');
+    const shown = box.querySelector('iframe');
+
+    if (!live) {
+      if (shown) box.replaceChildren();
+      continue;
+    }
+    if (shown) continue;
+
+    const frame = document.createElement('iframe');
+    frame.src = previewSrc(card.dataset.overlay);
+    frame.tabIndex = -1;
+    frame.setAttribute('aria-hidden', 'true');
+
+    // 頁が読み終えてから渡す（先に渡すと、頁の受け口がまだ無い）。
+    frame.addEventListener('load', () => {
+      const first = welcomeMessage();
+      if (first) postToPreview(frame, first);
+    });
+    box.replaceChildren(frame);
+  }
 }
 
 /// 選んでコピーできる 1 行（OBS の URL・時計に入れる宛先）。打ち直させない。note はどれかを見分ける添え書き（口の名前など）。
@@ -523,7 +632,13 @@ function selectTab(name) {
   // 伸ばすには「今日」を押すか、タブを開き直す。
   if (name === 'stats') loadDay({ keepView: true });
 
+  followVisibility();
+}
+
+/// 見えている間だけ動かすもの（心拍計の読み直し・配信のプレビュー）を、いまの見え方に合わせる。
+function followVisibility() {
   watchMonitors();
+  syncPreviews();
 }
 
 for (const tab of document.querySelectorAll('.spoitable-tabs .spoitable-tab')) tab.addEventListener('click', () => selectTab(tab.dataset.tab));
@@ -531,9 +646,9 @@ for (const tab of document.querySelectorAll('.spoitable-tabs .spoitable-tab')) t
 // シェルがこのパネルを隠した・出した（ほかの画面へ移った・戻った）。窓ごと隠れたとき（最小化）は visibilitychange が来る。
 new IntersectionObserver(entries => {
   panelShown = entries[entries.length - 1].isIntersecting;
-  watchMonitors();
+  followVisibility();
 }).observe(document.body);
-document.addEventListener('visibilitychange', watchMonitors);
+document.addEventListener('visibilitychange', followVisibility);
 
 // 統計のグラフ:
 //  - 色はテーマのトークンから引く（テーマを替えたら描き直す）

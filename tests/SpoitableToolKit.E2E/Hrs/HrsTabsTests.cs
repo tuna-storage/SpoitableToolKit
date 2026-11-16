@@ -301,38 +301,131 @@ public sealed class HrsTabsTests(AppFixture app) : IClassFixture<AppFixture>, IA
             said);
     }
 
-    /// <summary>配信のタブ: 待ち受けている間は様子と OBS に貼る URL、切ってあれば OFF の案内だけ。</summary>
+    /// <summary>
+    /// 配信の状態を渡す（ポートは何も待っていない番号。URL に出るだけ）。<paramref name="feed"/> は配信が最後に流した 1 通（JS の式。無ければ null）。
+    /// </summary>
+    private Task RenderBroadcast(bool listening, string feed = "null") => Inside.EvaluateAsync(
+        $$"""
+        (_, listening) => __realRender({
+          connected: false, receiving: false, running: true, connection: 'none', heartRate: 0,
+          samples: [{ bpm: 70, at: '2026-11-16T03:00:00Z' }, { bpm: 0, at: '2026-11-16T03:00:01Z' }, { bpm: 75, at: '2026-11-16T03:00:02Z' }],
+          wsEnabled: listening, wsStatus: listening ? 'listening' : 'disabled', wsPort: 1, wsClients: 2,
+          overlays: ['pill', 'glass', 'neon', 'widget'],
+          overlayFeed: {{feed}},
+        })
+        """, listening);
+
+    private ILocator Cards => Panel.Locator("#urls .overlay");
+
+    private ILocator Previews => Panel.Locator("#urls .overlay .preview iframe");
+
+    /// <summary>配信のタブ: 待ち受けの様子と、オーバーレイ 1 つにつき 1 枚のカード（名前・説明と大きさ・OBS に貼る URL）。切ってあっても、カードは出す。</summary>
     [Fact]
-    public async Task TheBroadcastTabShowsTheListeningStateAndTheUrls()
+    public async Task TheBroadcastTabShowsACardPerOverlayWithItsUrl()
+    {
+        await FreezeRender();
+        await Panel.Locator("#tabBroadcast").ClickAsync();
+        await RenderBroadcast(listening: true);
+
+        await Assertions.Expect(Panel.Locator("#wsState"))
+            .ToHaveTextAsync(await Inside.EvaluateAsync<string>("() => spoitable.t('hrs.panel.ws.listening', 1, 2)"));
+        await Assertions.Expect(Cards.Locator(".overlay-name")).ToHaveTextAsync(["Pill Badge", "Glass Card", "Neon Ring", "Full Widget"]);
+        await Assertions.Expect(Cards.Locator(".overlay-desc")).ToHaveTextAsync(
+        [
+            await Inside.EvaluateAsync<string>("() => spoitable.t('hrs.panel.overlays.pill') + ' · 400×112'"),
+            await Inside.EvaluateAsync<string>("() => spoitable.t('hrs.panel.overlays.glass') + ' · 600×260'"),
+            await Inside.EvaluateAsync<string>("() => spoitable.t('hrs.panel.overlays.neon') + ' · 384×384'"),
+            await Inside.EvaluateAsync<string>("() => spoitable.t('hrs.panel.overlays.widget') + ' · 680×320'"),
+        ]);
+        await Assertions.Expect(Cards.Locator(".url code")).ToHaveTextAsync(
+            ["http://localhost:1/overlay/pill", "http://localhost:1/overlay/glass", "http://localhost:1/overlay/neon", "http://localhost:1/overlay/widget"]);
+
+        await RenderBroadcast(listening: false);
+
+        await Assertions.Expect(Panel.Locator("#wsState"))
+            .ToHaveTextAsync(await Inside.EvaluateAsync<string>("() => spoitable.t('hrs.panel.ws.off')"));
+        await Assertions.Expect(Cards).ToHaveCountAsync(4);
+    }
+
+    /// <summary>
+    /// プレビュー（オーバーレイそのものを縮めた iframe）は、OBS が開くのと同じ頁を<b>パネルと同じ origin</b> で、印 <c>preview</c> を付けて開く
+    /// （パネルからは http://localhost を開けない）。配信を切っていても出し、配信タブを開いていてパネルが見えている間だけ置く。
+    /// 外れたら iframe ごと外す（4 枚が動き続けると CPU と GPU を食う）。
+    /// </summary>
+    [Fact]
+    public async Task TheLivePreviewsRunOnlyWhileTheTabIsShown()
     {
         await FreezeRender();
         await Panel.Locator("#tabBroadcast").ClickAsync();
 
-        await Inside.EvaluateAsync(
+        await RenderBroadcast(listening: false);
+        await Assertions.Expect(Cards).ToHaveCountAsync(4);
+        await Assertions.Expect(Previews).ToHaveCountAsync(4);
+        Assert.Equal(
+        [
+            "spoitable://hrs/overlays/pill.html?preview", "spoitable://hrs/overlays/glass.html?preview",
+            "spoitable://hrs/overlays/neon.html?preview", "spoitable://hrs/overlays/widget.html?preview",
+        ], await Previews.EvaluateAllAsync<string[]>("frames => frames.map(frame => frame.src)"));
+
+        // 毎拍の push で作り直さない（作り直すと、プレビューが毎秒読み直しになる）。
+        await Previews.First.EvaluateAsync("frame => { frame.dataset.kept = 'yes'; }");
+        await RenderBroadcast(listening: true);
+        await Assertions.Expect(Previews.First).ToHaveAttributeAsync("data-kept", "yes");
+
+        await Panel.Locator("#tabNow").ClickAsync();
+        await Assertions.Expect(Previews).ToHaveCountAsync(0);
+
+        await Panel.Locator("#tabBroadcast").ClickAsync();
+        await Assertions.Expect(Previews).ToHaveCountAsync(4);
+
+        await Page.Locator("#sidebar .item[data-id='log']").ClickAsync();
+        await Assertions.Expect(Previews).ToHaveCountAsync(0, new() { Timeout = 5_000 });
+
+        await Page.Locator("#sidebar .item[data-id='hrs']").ClickAsync();
+        await Assertions.Expect(Previews).ToHaveCountAsync(4, new() { Timeout = 5_000 });
+    }
+
+    /// <summary>
+    /// プレビューは、配信が最後に流した 1 通をパネル経由で受けて、OBS と同じものを出す。開いた直後は welcome（いまの様子と直近の心拍）、
+    /// そのあとは新しい 1 通（何通目かが変わったとき）だけ。切れたら「繋がっていない」の出し方になる。頁はパネルと同じ origin なので、中の DOM を読んで見る。
+    /// </summary>
+    [Fact]
+    public async Task APreviewShowsTheBroadcastMessageItIsGiven()
+    {
+        await FreezeRender();
+        await Panel.Locator("#tabBroadcast").ClickAsync();
+
+        const string beating =
+            "{ sent: 1, latest: { type: 'hr_update', bpm: 88, zone: 'moderate', connected: true, avg: 80, min: 70, max: 90, device: 'Belt' } }";
+        await RenderBroadcast(listening: false, beating);
+
+        var pill = Panel.FrameLocator(".overlay[data-overlay='pill'] iframe");
+        var widget = Panel.FrameLocator(".overlay[data-overlay='widget'] iframe");
+        await Assertions.Expect(pill.Locator("#bpm")).ToHaveTextAsync("88", new() { Timeout = 10_000 });
+        await Assertions.Expect(widget.Locator("#avg")).ToHaveTextAsync("80");
+        await Assertions.Expect(widget.Locator("#zone")).ToHaveTextAsync("Moderate Zone");
+
+        // welcome の直近の心拍（グラフの 0 を除いた 70・75）と、その 1 通の 88 で 3 点。同じ 1 通（同じ番号）は渡し直さない（渡すとグラフに点が積もる）。
+        await Assertions.Expect(widget.Locator("#bpm")).ToHaveTextAsync("88");
+        await RenderBroadcast(listening: false, beating);
+        await Task.Delay(500);
+        Assert.Equal(3, await widget.Locator("body").EvaluateAsync<int>("() => hist.length"));
+
+        // 頁が受けるのは親（このパネル）からだけ。シェル（いちばん上の窓）から送っても出ない。
+        await Page.EvaluateAsync(
             """
-            () => __realRender({
-              connected: false, receiving: false, running: true, connection: 'none', heartRate: 0, samples: [],
-              wsEnabled: true, wsStatus: 'listening', wsPort: 9100, wsClients: 2, overlays: ['pill', 'widget'],
-            })
+            () => document.querySelector("iframe.view[data-id='hrs']").contentWindow.frames[0]
+              .postMessage({ type: 'hr_update', bpm: 111, zone: 'hard', connected: true, avg: 111, min: 111, max: 111 }, '*')
             """);
+        await Task.Delay(500);
+        await Assertions.Expect(pill.Locator("#bpm")).ToHaveTextAsync("88");
 
-        await Assertions.Expect(Panel.Locator("#wsState"))
-            .ToHaveTextAsync(await Inside.EvaluateAsync<string>("() => spoitable.t('hrs.panel.ws.listening', 9100, 2)"));
-        await Assertions.Expect(Panel.Locator("#overlays")).ToBeVisibleAsync();
-        await Assertions.Expect(Panel.Locator("#urls .url code"))
-            .ToHaveTextAsync(["http://localhost:9100/overlay/pill", "http://localhost:9100/overlay/widget"]);
+        const string lost =
+            "{ sent: 2, latest: { type: 'hr_update', bpm: 0, zone: 'rest', connected: false, avg: 80, min: 70, max: 90 } }";
+        await RenderBroadcast(listening: false, lost);
 
-        await Inside.EvaluateAsync(
-            """
-            () => __realRender({
-              connected: false, receiving: false, running: true, connection: 'none', heartRate: 0, samples: [],
-              wsEnabled: false, wsStatus: 'disabled', wsPort: 9100, overlays: ['pill', 'widget'],
-            })
-            """);
-
-        await Assertions.Expect(Panel.Locator("#wsState"))
-            .ToHaveTextAsync(await Inside.EvaluateAsync<string>("() => spoitable.t('hrs.panel.ws.off')"));
-        await Assertions.Expect(Panel.Locator("#overlays")).ToBeHiddenAsync();
+        await Assertions.Expect(pill.Locator("#bpm")).ToHaveTextAsync("--");
+        await Assertions.Expect(pill.Locator("body")).ToHaveClassAsync("off");
     }
 
     /// <summary>狭い窓（VR の窓は字が 1.5 倍）でも、4 つのタブは 1 段に収まり、一覧の行は横にはみ出さない。</summary>
