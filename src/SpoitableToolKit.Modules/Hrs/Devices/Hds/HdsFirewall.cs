@@ -25,10 +25,18 @@ namespace SpoitableToolKit.Modules.Hrs.Devices.Hds;
 /// </summary>
 internal static class HdsFirewall
 {
-    /// <summary>通れそうか。<b>見えない = 必ず届かない、ではない</b>（読めないこともある）。</summary>
+    /// <summary>
+    /// 通れそうか。<b>見えない = 必ず届かない、ではない</b>（読めないこともある）。
+    /// パネルの注意が出るのは <see cref="Missing"/> と <see cref="Blocked"/> だけ。設定画面の行は全部を言い分ける。
+    /// </summary>
     internal enum State
     {
-        Unknown,
+        /// <summary>HDS を使っていない（見に行かない）。</summary>
+        Off,
+
+        /// <summary>見に行っている途中。</summary>
+        Checking,
+
         Present,
         Missing,
 
@@ -37,6 +45,9 @@ internal static class HdsFirewall
         /// 許可を足しても<b>ブロックが勝つ</b>ので、消さないと届かない。
         /// </summary>
         Blocked,
+
+        /// <summary>見に行ったが読めなかった（PowerShell が起きない・答えが読めない）。届かないと決まったわけではない。</summary>
+        Failed,
     }
 
     private static string RuleName(int port) => $"SpoitableToolKit HDS ({port})";
@@ -75,7 +86,7 @@ internal static class HdsFirewall
                 RedirectStandardError = true,
             });
 
-            if (process is null) return State.Unknown;
+            if (process is null) return State.Failed;
 
             var output = process.StandardOutput.ReadToEnd().Trim();
             process.WaitForExit(TimeSpan.FromSeconds(30));
@@ -86,14 +97,14 @@ internal static class HdsFirewall
                 "present" => State.Present,
                 "missing" => State.Missing,
 
-                // 読めなかっただけ。届かないと決まったわけではないので、パネルには何も出さない。
-                _ => State.Unknown,
+                // 読めなかっただけ。届かないと決まったわけではないので、パネルには何も出さない（設定画面の行は「確認できませんでした」）。
+                _ => State.Failed,
             };
         }
         catch (Exception ex)
         {
             logger.LogDebug(ex, "Could not check the firewall rules");
-            return State.Unknown;
+            return State.Failed;
         }
     }
 
@@ -159,7 +170,7 @@ internal static class HdsFirewall
         }
     }
 
-    /// <summary>手で直したい人のための 1 行。パネルに出してコピーできるようにする。</summary>
+    /// <summary>手で直したい人のための 1 行。パネルと設定画面に出して、コピーできるようにする。</summary>
     public static string CommandFor(int port) =>
         $"New-NetFirewallRule -DisplayName '{RuleName(port)}' -Description '{Description(port)}' "
         + $"-Direction Inbound -Action Allow -Protocol TCP -LocalPort {port} -Profile Private,Domain";

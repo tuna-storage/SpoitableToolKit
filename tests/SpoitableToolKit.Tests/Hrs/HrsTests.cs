@@ -800,6 +800,118 @@ public sealed class HrsTests
         }
     }
 
+    /// <summary>「変わった」を数えるだけの係（本物は push する）。</summary>
+    private sealed class RowCalls : SpoitableToolKit.Host.Config.Interfaces.IConfigActionSink
+    {
+        private readonly List<(string Module, string Key)> _seen = [];
+
+        public (string Module, string Key)[] Seen
+        {
+            get { lock (_seen) return [.. _seen]; }
+        }
+
+        public void Changed(string moduleId, string key)
+        {
+            lock (_seen) _seen.Add((moduleId, key));
+        }
+    }
+
+    private static ConfigActionView? Row(FakeModuleHost host) =>
+        host.Configs!.DescribeAction("hrs", "Hds.Firewall", new FakeLocalizer());
+
+    private static object? Field(object item, string name) => item.GetType().GetProperty(name)?.GetValue(item);
+
+    /// <summary>
+    /// 設定画面の「ファイアウォール」の行は、待ち受けポートのすぐ下に出て、前提は入/切とポート。OnInit で結ばれ、見つからなければボタンを出し、
+    /// 押すと（そのときだけ）足しに行って、直ったら行も変わる。パネルの注意も今までどおり消える。
+    /// </summary>
+    [Fact]
+    public async Task TheSettingsRowFollowsTheFirewallAndItsButtonAddsTheRule()
+    {
+        var seen = HdsFirewall.State.Missing;
+        var added = 0;
+        var module = new HrsModule
+        {
+            CreateSources = () => [new FakeSource()],
+            CheckFirewall = () => seen,
+            AddFirewall = () =>
+            {
+                Interlocked.Increment(ref added);
+                seen = HdsFirewall.State.Present;
+                return true;
+            },
+        };
+        ((HrsConfig)module.Config!).Hds.Enabled = true;
+
+        var host = new FakeModuleHost().WithConfig("hrs", module.Config!);
+        var calls = new RowCalls();
+        host.Configs!.ActionSink = calls;
+
+        try
+        {
+            Assert.True(module.OnInit(host));
+
+            var items = (object[])Field(host.Configs.Describe(new FakeLocalizer()).Single(), "items")!;
+            var keys = items.Select(i => (string)Field(i, "key")!).ToList();
+            Assert.Equal(keys.IndexOf("Hds.Port") + 1, keys.IndexOf("Hds.Firewall"));
+            var dependsOn = (string[])Field(items[keys.IndexOf("Hds.Firewall")], "dependsOn")!;
+            Assert.Equal(["Hds.Enabled", "Hds.Port"], dependsOn);
+
+            await WaitFor(() => Row(host)?.Status == "hrs.settings.hds.firewall.missing");
+            Assert.Equal("hrs.panel.firewall.add", Row(host)!.Button);
+            Assert.Contains("\"firewall\":\"missing\"", Status(module));
+            Assert.Equal(0, Volatile.Read(ref added));
+
+            Assert.True(host.Configs.RunAction("hrs", "Hds.Firewall"));
+            await WaitFor(() => Row(host)?.Status == "hrs.settings.hds.firewall.present");
+
+            Assert.Equal("hrs.settings.hds.firewall.present", Row(host)!.Status);
+            Assert.Null(Row(host)!.Button);
+            Assert.Equal(1, Volatile.Read(ref added));
+            Assert.Contains("\"firewall\":\"present\"", Status(module));
+            Assert.All(calls.Seen, call => Assert.Equal(("hrs", "Hds.Firewall"), call));
+            Assert.NotEmpty(calls.Seen);
+        }
+        finally
+        {
+            module.OnShutdown();
+        }
+    }
+
+    /// <summary>HDS の設定を適用したら、行を読み直させる（確認中 → そのポートの答え）。</summary>
+    [Fact]
+    public async Task ApplyingTheHdsPortTellsTheRowAgain()
+    {
+        var module = new HrsModule
+        {
+            CreateSources = () => [new FakeSource()],
+            CheckFirewall = () => HdsFirewall.State.Missing,
+        };
+        ((HrsConfig)module.Config!).Hds.Enabled = true;
+
+        var host = new FakeModuleHost().WithConfig("hrs", module.Config!);
+        var calls = new RowCalls();
+        host.Configs!.ActionSink = calls;
+
+        try
+        {
+            Assert.True(module.OnInit(host));
+            await WaitFor(() => Row(host)?.Detail == "hrs.panel.firewall.missing(3476)");
+            var before = calls.Seen.Length;
+
+            Assert.Empty(Apply(host, """{ "Hds.Port": 4100 }"""));
+            await WaitFor(() => Row(host)?.Detail == "hrs.panel.firewall.missing(4100)");
+
+            Assert.Equal("hrs.panel.firewall.missing(4100)", Row(host)!.Detail);
+            Assert.Equal(HdsFirewall.CommandFor(4100), Row(host)!.Copy);
+            Assert.True(calls.Seen.Length >= before + 2, $"確認中と答えの 2 回を流すはず（{calls.Seen.Length - before} 回）");
+        }
+        finally
+        {
+            module.OnShutdown();
+        }
+    }
+
     // 手首のタイルに描く心拍。押すとパネルを開き、ページは同梱の web/tile.html。getHeartRate は記録を数えない軽い口で、push（status）と同じ名前で今の心拍と線の分を返す。
     [Fact]
     public async Task TheLiveTileOpensThePanelAndReadsTheBeatWithoutCountingTheRecords()

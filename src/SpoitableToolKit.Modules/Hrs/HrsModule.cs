@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SpoitableToolKit.Abstractions;
@@ -87,8 +88,8 @@ public sealed class HrsModule : ISpoitableModule, IConfigEventListener<HrsConfig
         // 係は最初に作る。相手（窓口・配信・記録・host・logger）は読むときに引く — 立ち上がる途中（窓口や配信が出来る前）や
         // 畳んだあとにも、裏の仕事（ファイアウォール・数え直し・書き出し）から push が来る。試験の口（CheckFirewall など）も呼ぶときに読む。
         _firewall = new HdsFirewallWatch(_config,
-            port => CheckFirewall?.Invoke() ?? HdsFirewall.Check(port, _logger),
-            port => AddFirewall?.Invoke() ?? HdsFirewall.Fix(port, _logger),
+            port => CheckFirewall?.Invoke() ?? _firewallFile?.Check() ?? HdsFirewall.Check(port, _logger),
+            port => AddFirewall?.Invoke() ?? _firewallFile?.Add(port) ?? HdsFirewall.Fix(port, _logger),
             PushStatus);
         _recordQuery = new HeartRateRecordQueryService(() => _records, () => _logger, PushStatus);
         _export = new HeartRateExportService(() => _records, () => _host, () => _logger, _recordQuery, PushStatus);
@@ -138,8 +139,21 @@ public sealed class HrsModule : ISpoitableModule, IConfigEventListener<HrsConfig
 
         _config.Discovered = () => _source?.Discovered ?? [];
 
+        // e2e の口。本物のファイアウォールも UAC も触らず、HDS もループバックだけで待つ（HdsFirewallFile に理由）。
+        if (Environment.GetEnvironmentVariable(HdsFirewallFile.Variable) is { Length: > 0 } fake)
+        {
+            _firewallFile = new HdsFirewallFile(fake);
+            _logger.LogInformation("{Variable} is set; the firewall is the file {File} and HDS listens on loopback only",
+                HdsFirewallFile.Variable, fake);
+        }
+
+        // 設定画面の「ファイアウォール」の行。状態は係が持っていて、変わるたびに係が行へ知らせる。ボタンは押したときだけ足す（UAC が出る）。
+        _config.Hds.Firewall.Bind(
+            describe: text => _firewall.Describe(text),
+            run: () => _firewall.AddRuleAsync());
+
         // ファイアウォールは**アプリからは足さない**。初回の待ち受けで Windows 自身が聞く。
-        // ここで見るのは「通れそうか」だけで、駄目そうならパネルがボタンを出す。
+        // ここで見るのは「通れそうか」だけで、駄目そうならパネルと設定画面の行がボタンを出す。
         _firewall.Refresh();
 
         _records = CreateRecords?.Invoke()
@@ -154,7 +168,8 @@ public sealed class HrsModule : ISpoitableModule, IConfigEventListener<HrsConfig
 
         // 心拍の窓口。繋がった・切れたは OnInit で 1 回だけ受ける（1 拍は周回ごとに session と記録が受ける — HeartRateCapture.Start）。
         _source = new HeartRateManager(
-            [.. (CreateSources?.Invoke() ?? [new WinRtHeartRateSource(_config, _logger), new HdsHeartRateSource(_config, _logger)])
+            [.. (CreateSources?.Invoke() ?? [new WinRtHeartRateSource(_config, _logger),
+                    new HdsHeartRateSource(_config, _logger, bindTo: _firewallFile is null ? null : IPAddress.Loopback)])
                 .Select(source => new SourceAsDevice(source))],
             host.Events.Create<IHeartRateEventListener>(this),
             Time);
@@ -202,6 +217,9 @@ public sealed class HrsModule : ISpoitableModule, IConfigEventListener<HrsConfig
     internal Func<HdsFirewall.State>? CheckFirewall;
 
     internal Func<bool>? AddFirewall;
+
+    /// <summary>e2e のファイアウォール（<see cref="HdsFirewallFile"/>）。環境変数があるときだけ OnInit で作る。</summary>
+    private HdsFirewallFile? _firewallFile;
 
     /// <summary>
     /// 繋がった（窓口から）。<b>ここからは配信へ流さない。</b> 配信の <c>connected</c> は「心拍が届いているか」で、
