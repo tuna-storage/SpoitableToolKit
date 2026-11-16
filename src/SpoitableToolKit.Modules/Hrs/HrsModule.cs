@@ -95,7 +95,8 @@ public sealed class HrsModule : ISpoitableModule, IConfigEventListener<HrsConfig
         _announcer = new HeartRateAnnouncer(_status, _log, _config, () => _host, () => _broadcast, () => _source);
         _beats = new HeartBeatRecorder(_log, _config, () => _records, () => _source, () => _logger, _recordQuery, _announcer, PushStatus);
         _capture = new HeartRateCapture(this, () => _host, () => _source, () => _sessionEvents, _config, () => _logger, _beats, PushStatus);
-        _panel = new HrsPanelStatus(_config, _log, () => _host, () => _source, () => _capture.Session, () => _broadcast, _firewall, _recordQuery, _export);
+        _panel = new HrsPanelStatus(_config, _log, () => _host, () => _source, () => _capture.Session, () => _broadcast, _firewall, _recordQuery, _export,
+            () => (Time ?? TimeProvider.System).GetUtcNow());
         _connections = new HeartRateConnectionWatch(() => _source, _log, _announcer, () => _logger);
         _broadcastRunner = new HrsBroadcastRunner(() => _broadcast, () => _logger);
     }
@@ -176,7 +177,8 @@ public sealed class HrsModule : ISpoitableModule, IConfigEventListener<HrsConfig
     internal Func<IReadOnlyList<IHeartRateSource>>? CreateSources;
 
     /// <summary>
-    /// 窓口の時計（黙ったのを数える）。<b>試験からはここを差し替える</b> — 時間を進めて「心拍なし」を起こす（本物の秒数を待たない）。
+    /// 窓口の時計（黙ったのを数える）。パネルの「心拍計」タブも、繋がっている 1 台が広告をやめたかをこれで見る。
+    /// <b>試験からはここを差し替える</b> — 時間を進めて「心拍なし」を起こす（本物の秒数を待たない）。
     /// </summary>
     internal TimeProvider? Time;
 

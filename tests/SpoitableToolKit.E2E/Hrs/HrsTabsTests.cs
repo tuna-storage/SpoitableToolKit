@@ -40,11 +40,18 @@ public sealed class HrsTabsTests(AppFixture app) : IClassFixture<AppFixture>, IA
             }
             """);
         await Page.EvaluateAsync("() => { const frame = document.querySelector(\"iframe.view[data-id='hrs']\"); if (frame) frame.style.width = frame.style.maxWidth = ''; }");
+
+        // 別の画面へ移した試験が途中で落ちても、隠れたパネルのタブは押せないので、先にパネルを出す。
+        await Page.Locator("#sidebar .item[data-id='hrs']").ClickAsync();
         await Panel.Locator("#tabNow").ClickAsync();
     }
 
     /// <summary>C# からの push で描き換わらないよう、受け口だけ止める。</summary>
     private Task FreezeRender() => Inside.EvaluateAsync("() => { window.__realRender = render; render = () => {}; }");
+
+    private async Task<IFrame> FrameAsync() =>
+        await (await Page.Locator("iframe.view[data-id='hrs']").ElementHandleAsync()).ContentFrameAsync()
+        ?? throw new InvalidOperationException("心拍のパネルに frame が無い");
 
     /// <summary>
     /// 心拍計の一覧を読み直す口だけを包み、渡した JS の式（呼ばれるたびに評価する）で答える。呼ばれた口の名前は <c>__calls</c> に積む。
@@ -160,6 +167,31 @@ public sealed class HrsTabsTests(AppFixture app) : IClassFixture<AppFixture>, IA
 
         await Panel.Locator("#tabNow").ClickAsync();
         Assert.False(await Inside.EvaluateAsync<bool>("() => __monitors.watching"));
+    }
+
+    /// <summary>
+    /// シェルがほかの画面へ移るとパネルの iframe は隠れるだけで、visibilitychange は来ない。心拍計タブを開いたままでも、
+    /// 隠れている間は読み直しを止め、戻ったらまた読み直す。
+    /// </summary>
+    [Fact]
+    public async Task TheMonitorsTabStopsReadingWhileThePanelIsHidden()
+    {
+        await FreezeRender();
+        await AnswerMonitors("[{ name: 'Belt', address: 'A0:9E:1A:00:00:01', signal: -50 - n, lastSeen: ago(0), connected: false }]");
+
+        await Panel.Locator("#tabMonitors").ClickAsync();
+        await Assertions.Expect(Rows.Nth(0).Locator(".signal")).ToHaveTextAsync("-50 dBm");
+        var frame = await FrameAsync();
+        await frame.WaitForFunctionAsync("() => __monitors.watching", null, new FrameWaitForFunctionOptions { Timeout = 5_000 });
+
+        await Page.Locator("#sidebar .item[data-id='log']").ClickAsync();
+        await frame.WaitForFunctionAsync("() => !__monitors.watching", null, new FrameWaitForFunctionOptions { Timeout = 5_000 });
+        var hidden = await Rows.Nth(0).Locator(".signal").TextContentAsync();
+
+        // 戻ったら、次の周期を待たずに 1 回読む（答えるたびに電波の強さが変わる）。
+        await Page.Locator("#sidebar .item[data-id='hrs']").ClickAsync();
+        await frame.WaitForFunctionAsync("() => __monitors.watching", null, new FrameWaitForFunctionOptions { Timeout = 5_000 });
+        await Assertions.Expect(Rows.Nth(0).Locator(".signal")).Not.ToHaveTextAsync(hidden!, new() { Timeout = 2_000 });
     }
 
     /// <summary>区切り: 10 秒未満は「たった今」、1 分未満は秒、1 時間未満は分、その先は時間。C# が書く時刻（小数 7 桁）も読める。</summary>

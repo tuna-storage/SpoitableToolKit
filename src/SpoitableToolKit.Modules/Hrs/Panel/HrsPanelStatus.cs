@@ -26,7 +26,8 @@ internal sealed class HrsPanelStatus(
     Func<HrsBroadcastServer?> broadcast,
     HdsFirewallWatch firewall,
     HeartRateRecordQueryService records,
-    HeartRateExportService export)
+    HeartRateExportService export,
+    Func<DateTimeOffset> now)
 {
     /// <summary>
     /// パネルへ現状を流す。開いていなければホストが捨てる（best-effort）ので、
@@ -105,8 +106,9 @@ internal sealed class HrsPanelStatus(
     {
         var src = source();
         var connected = src?.Connected;
+        var at = now();
 
-        return [.. (src?.Sightings ?? []).Select(seen => HrsPanelMonitor.From(seen, connected))];
+        return [.. (src?.Sightings ?? []).Select(seen => HrsPanelMonitor.From(seen, connected, at))];
     }
 
     private HrsPanelSample[] Samples() => [.. log.Recent.Select(s => new HrsPanelSample(s.Bpm, s.At.ToString("O")))];

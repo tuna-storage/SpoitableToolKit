@@ -431,11 +431,19 @@ function ago(iso, now = Date.now()) {
 
 // 心拍計タブを開いている間だけ、一覧を数秒おきに読み直す。広告は 1 秒に何通も来るので C# からは push しない —
 // 読み直さないと「〜前」と dBm が開いたときのまま止まり、あとから見つけた心拍計も出てこない。
-// 読むのは一覧だけの軽い口（getMonitors。記録は数えない — getStatus は数える）。
+// 読むのは一覧だけの軽い口（getMonitors。記録は数えない — getStatus は数える）。**パネルが隠れている間は止める。**
 const MONITORS_EVERY = 3000;
 let monitorsTimer = 0;
 
-function watchMonitors(on) {
+/// パネルが画面に出ているか。シェルはほかの画面へ移るとき iframe を display: none にするだけで、
+/// visibilitychange は来ない（ページそのものは見えたまま）。body が画面に掛かっているかで見る（下の IntersectionObserver）。
+let panelShown = true;
+
+/// 読み直すか（心拍計タブを開いていて、パネルも窓も見えている）を見て、時計を合わせる。何度呼んでもよい。
+function watchMonitors() {
+  const on = activeTab === 'monitors' && panelShown && !document.hidden;
+  if (on === (monitorsTimer !== 0)) return;
+
   clearInterval(monitorsTimer);
   monitorsTimer = 0;
   if (!on) return;
@@ -471,10 +479,17 @@ function selectTab(name) {
   // 伸ばすには「今日」を押すか、タブを開き直す。
   if (name === 'stats') loadDay({ keepView: true });
 
-  watchMonitors(name === 'monitors');
+  watchMonitors();
 }
 
 for (const tab of document.querySelectorAll('.spoitable-tabs .spoitable-tab')) tab.addEventListener('click', () => selectTab(tab.dataset.tab));
+
+// シェルがこのパネルを隠した・出した（ほかの画面へ移った・戻った）。窓ごと隠れたとき（最小化）は visibilitychange が来る。
+new IntersectionObserver(entries => {
+  panelShown = entries[entries.length - 1].isIntersecting;
+  watchMonitors();
+}).observe(document.body);
+document.addEventListener('visibilitychange', watchMonitors);
 
 // 統計のグラフ:
 //  - 色はテーマのトークンから引く（テーマを替えたら描き直す）

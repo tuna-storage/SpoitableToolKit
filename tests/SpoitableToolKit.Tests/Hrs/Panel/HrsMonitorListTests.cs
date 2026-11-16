@@ -35,18 +35,15 @@ public sealed class HrsMonitorListTests
 
     /// <summary>
     /// 「接続中」はアドレスで見る。名前の前方一致で見ると「Polar」に繋がっているときに「Polar H10 …」にも、名前で見ると同じ名前の別の 1 台にも印が付く。
-    /// 電波の強さと最後に見た時刻は、入口が持っている値のまま出す（「〜前」はパネルが数える）。
+    /// 電波の強さと最後に見た時刻は、入口が持っている値のまま出す（「〜前」はパネルが数える。繋がっている 1 台も、広告が新しければそのまま）。
     /// </summary>
     [Fact]
     public async Task TheStatusListsEachMonitorWithItsSignalAndMarksTheConnectedOneByAddress()
     {
-        var source = new SeenSource(Belt,
+        var module = Start(new SeenSource(Belt,
             new MonitorSighting(Belt, -61, At),
             new MonitorSighting(LongerName, -75, At.AddSeconds(-30)),
-            new MonitorSighting(SameName, -90, At.AddMinutes(-2)));
-
-        var module = new HrsModule { CreateSources = () => [source] };
-        Assert.True(module.OnInit(new FakeModuleHost().WithConfig("hrs", module.Config!)));
+            new MonitorSighting(SameName, -90, At.AddMinutes(-2))));
         try
         {
             await WaitFor(() => Rows(Status(module)).Any(row => row.Connected));
@@ -71,10 +68,7 @@ public sealed class HrsMonitorListTests
     [Fact]
     public async Task TheMonitorListIsReadWithoutCountingTheRecords()
     {
-        var source = new SeenSource(Belt, new MonitorSighting(Belt, -61, At), new MonitorSighting(LongerName, -75, At));
-
-        var module = new HrsModule { CreateSources = () => [source] };
-        Assert.True(module.OnInit(new FakeModuleHost().WithConfig("hrs", module.Config!)));
+        var module = Start(new SeenSource(Belt, new MonitorSighting(Belt, -61, At), new MonitorSighting(LongerName, -75, At)));
         try
         {
             await WaitFor(() => Rows(Status(module)).Any(row => row.Connected));
@@ -94,25 +88,69 @@ public sealed class HrsMonitorListTests
         }
     }
 
-    /// <summary>電波の強さと時刻を持たない入口（既定の <see cref="IHeartRateSource.Sightings"/>）は、その 2 つを書かない（null は書かない）。</summary>
+    /// <summary>
+    /// GATT で繋ぐと広告を止める機種がある。繋がっている 1 台の最後の広告が古ければ、その時刻と電波の強さは出さずに「いま」とする
+    /// （残っているのは繋いだときの広告で、そのままだと「接続中・2 分前」になる）。繋がっていない 1 台は広告のまま。
+    /// </summary>
     [Fact]
-    public async Task AMonitorWithoutASignalIsListedWithoutOne()
+    public async Task AConnectedMonitorThatStoppedAdvertisingIsSeenNowWithoutAStaleSignal()
     {
-        var source = new PlainSource(Belt, Belt);
-
-        var module = new HrsModule { CreateSources = () => [source] };
-        Assert.True(module.OnInit(new FakeModuleHost().WithConfig("hrs", module.Config!)));
+        var module = Start(new SeenSource(Belt,
+            new MonitorSighting(Belt, -61, At.AddMinutes(-2)),
+            new MonitorSighting(LongerName, -75, At.AddMinutes(-2))));
         try
         {
             await WaitFor(() => Rows(Status(module)).Any(row => row.Connected));
 
             Row[] rows = Rows(await module.HandleUiCallAsync("getMonitors", ""));
-            Assert.Equal([new Row("Polar", "A0:9E:1A:00:00:01", null, null, true)], rows);
+            Assert.Equal(
+            [
+                new Row("Polar", "A0:9E:1A:00:00:01", null, At.ToString("O"), true),
+                new Row("Polar H10 1234", "A0:9E:1A:00:00:02", -75, At.AddMinutes(-2).ToString("O"), false),
+            ], rows);
         }
         finally
         {
             module.OnShutdown();
         }
+    }
+
+    /// <summary>
+    /// 電波の強さと時刻を持たない入口（既定の <see cref="IHeartRateSource.Sightings"/>）は、その 2 つを書かない（null は書かない）。
+    /// 繋がっている 1 台は居るのが分かっているので、時刻だけ「いま」。
+    /// </summary>
+    [Fact]
+    public async Task AMonitorWithoutASignalIsListedWithoutOne()
+    {
+        var module = Start(new PlainSource(Belt, Belt, LongerName));
+        try
+        {
+            await WaitFor(() => Rows(Status(module)).Any(row => row.Connected));
+
+            Row[] rows = Rows(await module.HandleUiCallAsync("getMonitors", ""));
+            Assert.Equal(
+            [
+                new Row("Polar", "A0:9E:1A:00:00:01", null, At.ToString("O"), true),
+                new Row("Polar H10 1234", "A0:9E:1A:00:00:02", null, null, false),
+            ], rows);
+        }
+        finally
+        {
+            module.OnShutdown();
+        }
+    }
+
+    /// <summary>窓口とパネルの「いま」を <see cref="At"/> に止めて動かす。</summary>
+    private static HrsModule Start(IHeartRateSource source)
+    {
+        var module = new HrsModule { CreateSources = () => [source], Time = new Clock(At) };
+        Assert.True(module.OnInit(new FakeModuleHost().WithConfig("hrs", module.Config!)));
+        return module;
+    }
+
+    private sealed class Clock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     private static string Status(HrsModule module) =>
