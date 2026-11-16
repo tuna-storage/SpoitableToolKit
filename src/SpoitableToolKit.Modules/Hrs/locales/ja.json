@@ -18,7 +18,7 @@
   "hrs.settings.smoothValues.label": "値をスムーズに変化させる",
   "hrs.settings.smoothValues.description": "送信する心拍と平均を、新しく受信した値へ 1 秒ほどかけて近づけます。OFF にすると受信した値をそのまま送信します。拍のタイミングは変わりません。",
   "hrs.settings.hds.label": "Apple Watch から受信する (HDS)",
-  "hrs.settings.hds.description": "Health Data Server (Apple Watch のアプリ) が送信する心拍を LAN 経由で受信します。心拍計と Apple Watch は同時に使用でき、先に届いた方が使われます。初回の待ち受け時に Windows のファイアウォールの確認が表示されます。拒否した場合は hrs のパネルから修正できます。",
+  "hrs.settings.hds.description": "Health Data Server (Apple Watch のアプリ) が送信する心拍を LAN 経由で受信します。心拍計と Apple Watch は同時に使用でき、先に届いた方が使われます。初回の待ち受け時に Windows のファイアウォールの確認が表示されます。拒否した場合は、下の「ファイアウォール」から修正できます。",
   "hrs.settings.hds.port.label": "待ち受けポート",
   "hrs.settings.hds.port.description": "Apple Watch のアプリに、この PC の IP アドレスと一緒に入力するポートです。既定は HDS の標準ポートです。",
   "hrs.settings.hds.firewall.label": "ファイアウォール",

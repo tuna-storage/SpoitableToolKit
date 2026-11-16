@@ -18,7 +18,7 @@
   "hrs.settings.smoothValues.label": "Smooth the values",
   "hrs.settings.smoothValues.description": "Moves the heart rate and the average that are sent towards each new reading over about a second. When off, each reading is sent as it arrives. The beat timing does not change.",
   "hrs.settings.hds.label": "Receive from Apple Watch (HDS)",
-  "hrs.settings.hds.description": "Receives the heart rate that Health Data Server (the Apple Watch app) sends over the LAN. The monitor and the watch can be used at once; whichever arrives first is used. Windows asks about the firewall the first time this listens; if you declined, the hrs panel can fix it.",
+  "hrs.settings.hds.description": "Receives the heart rate that Health Data Server (the Apple Watch app) sends over the LAN. The monitor and the watch can be used at once; whichever arrives first is used. Windows asks about the firewall the first time this listens; if you declined, you can fix it with Firewall below.",
   "hrs.settings.hds.port.label": "Listening port",
   "hrs.settings.hds.port.description": "The port you enter in the watch app, together with this PC's IP. Defaults to the standard HDS port.",
   "hrs.settings.hds.firewall.label": "Firewall",
