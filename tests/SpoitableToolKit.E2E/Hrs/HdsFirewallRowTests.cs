@@ -95,7 +95,27 @@ public sealed class HdsFirewallRowTests(HdsFirewallAppFixture app) : IClassFixtu
         Assert.False(await Row.EvaluateAsync<bool>("row => row.closest('.cfg-row').classList.contains('nomatch')"));
     }
 
-    /// <summary>VR の窓の幅（本文が狭い）でも、横にはみ出さずに折り返す（長いコマンドも）。</summary>
+    /// <summary>
+    /// 動きの行の、見えていないことのある字（「変更を適用すると使えます」・コピーのボタン・コマンド）や、状態の説明・ボタンの注記には当たらない。
+    /// 当たるのは名前と説明だけ（「コピー」「適用」で、何も見えていない行が出てこないように）。
+    /// </summary>
+    [Fact]
+    public async Task SearchDoesNotHitTheRowsHelperTexts()
+    {
+        foreach (var needle in new[] { "変更を適用すると使えます", "コピー", "New-NetFirewallRule", "受信ポート TCP", "管理者の確認" })
+        {
+            await Page.Locator("#cfgSearch").FillAsync(needle);
+            Assert.True(await Row.EvaluateAsync<bool>("row => row.closest('.cfg-row').classList.contains('nomatch')"), $"「{needle}」で当たった");
+        }
+
+        await Page.Locator("#cfgSearch").FillAsync("ルールはボタンを押したときにだけ追加されます");
+        await Assertions.Expect(Row).ToBeVisibleAsync();
+    }
+
+    /// <summary>
+    /// VR の窓の幅（本文が狭い）でも、設定の画面が横に巻かない。長いコマンドは折り返す —
+    /// 折り返さないと、行もその囲みも一緒に広がるので、行やコマンドの欄の中では何もはみ出さず、設定の画面ごと横に広がる。
+    /// </summary>
     [Fact]
     public async Task TheRowWrapsInANarrowWindow()
     {
@@ -104,16 +124,19 @@ public sealed class HdsFirewallRowTests(HdsFirewallAppFixture app) : IClassFixtu
 
         var overflow = await Row.EvaluateAsync<JsonElement>(
             """
-            row => ({
-              row: row.scrollWidth - row.clientWidth,
-              code: row.querySelector('.cfg-action-copy code').scrollWidth - row.querySelector('.cfg-action-copy code').clientWidth,
-              lines: Math.round(row.querySelector('.cfg-action-copy code').getBoundingClientRect().height
-                / parseFloat(getComputedStyle(row.querySelector('.cfg-action-copy code')).lineHeight)),
-            })
+            row => {
+              const code = row.querySelector('.cfg-action-copy code');
+              const style = getComputedStyle(code);
+              return {
+                page: el.cfgScroll.scrollWidth - el.cfgScroll.clientWidth,
+                spill: Math.ceil(row.getBoundingClientRect().right - el.cfgScroll.getBoundingClientRect().right),
+                lines: Math.round((code.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)) / parseFloat(style.lineHeight)),
+              };
+            }
             """);
 
-        Assert.True(overflow.GetProperty("row").GetInt32() <= 0, $"行が横にはみ出している（{overflow}）");
-        Assert.True(overflow.GetProperty("code").GetInt32() <= 0, $"コマンドが横にはみ出している（{overflow}）");
+        Assert.True(overflow.GetProperty("page").GetInt32() <= 0, $"設定の画面が横に巻く（{overflow}）");
+        Assert.True(overflow.GetProperty("spill").GetInt32() <= 0, $"行が設定の画面の右へはみ出している（{overflow}）");
         Assert.True(overflow.GetProperty("lines").GetInt32() > 1, $"コマンドが折り返していない（{overflow}）");
     }
 
@@ -179,6 +202,44 @@ public sealed class HdsFirewallRowTests(HdsFirewallAppFixture app) : IClassFixtu
         await Assertions.Expect(Row.Locator(".cfg-action-detail")).ToContainTextAsync($"TCP {next}");
         await Assertions.Expect(Button).ToBeVisibleAsync();
         await Assertions.Expect(ApplyFirst).ToBeHiddenAsync();
+    }
+
+    /// <summary>
+    /// 一部だけ入った「適用」（本体の値は入り、hrs は範囲外の値で丸ごと断られた）のあと、画面は残した溜めで描き直す。
+    /// 打ち替えたポートも残るので、行はボタンではなく「変更を適用すると使えます」のまま（前のポートの話でボタンを出さない）。
+    /// </summary>
+    [Fact]
+    public async Task AnApplyThatKeepsThePortEditStillAsksToApplyFirst()
+    {
+        var confirm = Page.Locator("#viewSettings .cfg-group[data-module='host'] .cfg-item[data-key='ConfirmSeconds'] input[type=number]");
+        var before = await Page.EvaluateAsync<int>(
+            "() => JSON.parse(window.__stkConfigs.find(g => g.module === 'host').items.find(i => i.key === 'ConfirmSeconds').value)");
+
+        try
+        {
+            await app.SettingsPage("notify").ClickAsync();
+            await confirm.FillAsync((before == 600 ? before - 1 : before + 1).ToString());
+
+            await app.SettingsPage("hrs").ClickAsync();
+            await Item("Hds.Port").Locator("input[type=number]").FillAsync(AppFixture.FreePort().ToString());
+            await Item("Hds.NoSignalSeconds").Locator("input[type=number]").FillAsync("5");
+            await Assertions.Expect(ApplyFirst).ToBeVisibleAsync();
+
+            await Page.Locator("#cfgCommit").ClickAsync();
+
+            // 本体の分は入り、hrs の分は断られて溜めに残った（範囲外の欄は赤く、ポートは「変更済み」のまま）。
+            await Assertions.Expect(Item("Hds.NoSignalSeconds")).ToHaveClassAsync(new Regex(@"\bbad\b"));
+            await Assertions.Expect(Item("Hds.Port")).ToHaveClassAsync(new Regex(@"\bdirty\b"));
+            await Assertions.Expect(Page.Locator("#cfgApply")).ToBeVisibleAsync();
+
+            await Assertions.Expect(ApplyFirst).ToBeVisibleAsync();
+            await Assertions.Expect(Button).ToBeHiddenAsync();
+        }
+        finally
+        {
+            if (await Page.Locator("#cfgApply").IsVisibleAsync()) await Page.Locator("#cfgCancel").ClickAsync();
+            await Page.EvaluateAsync("value => bridge.applyConfigChanges(JSON.stringify({ host: { ConfirmSeconds: value } }))", before);
+        }
     }
 
     /// <summary>ブロックのときは「ブロックを削除して許可」。手で足しても届かないので、コピーの 1 行は出さない。</summary>

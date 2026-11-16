@@ -3636,7 +3636,12 @@ async function loadSettings({ keepScroll = false, keep = [] } = {}) {
     const scope = `.cfg-group[data-module="${CSS.escape(entry.module)}"]`;
     el.cfgList.querySelector(`${scope} .cfg-item[data-key="${key}"], ${scope} .cfg-item[data-toggle-key="${key}"]`)?.classList.add('dirty');
   }
-  if (keep.length) renderApplyBar();
+  if (keep.length) {
+    renderApplyBar();
+
+    // 動きの行は、溜めが空のうちに描いている。残した溜めに前提の設定（打ち替えたポートなど）があれば、ボタンを「変更を適用すると使えます」に戻す。
+    paintActions();
+  }
 
   if (keepScroll) el.cfgScroll.scrollTop = top;
 }
@@ -3848,6 +3853,10 @@ function keepNewerAction(module, key, state) {
 function renderActionItem(module, item, row, meta) {
   row.classList.add('cfg-action');
   row._dependsOn = item.dependsOn ?? [];
+
+  // 探すときはこの 2 つだけに当てる（searchableText）。
+  row._label = item.label ?? '';
+  row._description = item.description ?? '';
 
   // 札は右（ほかの行の入力と同じ場所）。説明・ボタン・コピーは下に横幅いっぱい（VR の窓の狭い幅でも折り返す）。
   const control = document.createElement('div');
@@ -4843,6 +4852,15 @@ function markToc(chosen = tocChosen) {
 }
 
 /**
+ * 探すときに当てる字。値の行は行の字ぜんぶ。**動きの行は名前と説明だけ** — 札・説明の文・ボタン・「変更を適用すると使えます」・コピーの字とコマンドは
+ * 状態で入れ替わり、隠れていることもある（「コピー」や「適用」で、見えていない字に当たって行が出てしまう）。
+ */
+function searchableText(row) {
+  if (!row) return '';
+  return row._action ? `${row._label}\n${row._description}` : row.textContent;
+}
+
+/**
  * 設定の中を探す。**当たらない行・空になった囲み・見出しは畳む**（値は溜めたまま残る）。
  * 探していなければ、**開いているページだけ**を出す。探している間は**ページをまたいで**当たったページを見出しごと全部出し、一覧に当たった数を出す。
  */
@@ -4855,7 +4873,7 @@ function applyCfgSearch() {
     for (const box of section.querySelectorAll('.cfg-box')) {
       const wraps = [...box.querySelectorAll(':scope > .cfg-row')];
       const depthOf = wrap => Number(wrap.querySelector('.cfg-item')?.dataset.depth ?? 0);
-      const hit = wraps.map(wrap => !needle || (wrap.querySelector('.cfg-item')?.textContent ?? '').toLowerCase().includes(needle));
+      const hit = wraps.map(wrap => !needle || searchableText(wrap.querySelector('.cfg-item')).toLowerCase().includes(needle));
 
       // 当たった行が入れ物の中なら、入れ物の見出しも出す。中が切で閉じていても、見出しのスイッチから開ける
       // （出さないと、当たった数だけ出て中身の無い囲みが残る）。
