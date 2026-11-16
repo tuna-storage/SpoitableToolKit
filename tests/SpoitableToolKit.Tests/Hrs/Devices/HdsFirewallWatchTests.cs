@@ -94,6 +94,73 @@ public sealed class HdsFirewallWatchTests
         Assert.Equal(HdsFirewall.State.Present, watch.State);
     }
 
+    /// <summary>
+    /// UAC の返事を待つ間（数分ありうる）に設定を適用し直して見直しが走っても、足し終わったあとの見直しが残る。
+    /// 押した時点の番号で見直すと、待つ間の見直しに番号を追い越されて答えが捨てられ、足したのに「見当たりません」のままになる。
+    /// </summary>
+    [Fact]
+    public async Task ARecheckWhileThePromptIsOpenDoesNotHideTheFix()
+    {
+        var config = new HrsConfig();
+        config.Hds.Enabled = true;
+        var rule = false;
+        var prompted = new TaskCompletionSource();
+        var answer = new TaskCompletionSource<bool>();
+        var watch = new HdsFirewallWatch(config, _ => Volatile.Read(ref rule) ? HdsFirewall.State.Present : HdsFirewall.State.Missing, _ =>
+        {
+            prompted.SetResult();
+            var added = answer.Task.Result;
+            Volatile.Write(ref rule, added);
+            return added;
+        }, () => { });
+
+        watch.Refresh();
+        await WaitFor(() => watch.State == HdsFirewall.State.Missing);
+
+        // UAC が出ている間に、設定を適用し直した（見直しが走って、まだ見当たらないと答える）。
+        var adding = watch.AddRuleAsync();
+        await prompted.Task;
+        watch.Refresh();
+        await WaitFor(() => watch.State == HdsFirewall.State.Missing);
+        Assert.False(adding.IsCompleted);
+
+        answer.SetResult(true);
+        await adding;
+
+        Assert.Equal(HdsFirewall.State.Present, watch.State);
+    }
+
+    /// <summary>待つ間にポートを変えていたら、足し終わったあとの見直しはいまのポートで見る（押した時点のポートの答えで上書きしない）。</summary>
+    [Fact]
+    public async Task TheRecheckAfterAnAddLooksAtThePortAppliedMeanwhile()
+    {
+        var config = new HrsConfig();
+        config.Hds.Enabled = true;
+        config.Hds.Port = 1000;
+        var allowed = new System.Collections.Concurrent.ConcurrentDictionary<int, bool>();
+        var answer = new TaskCompletionSource<bool>();
+        var watch = new HdsFirewallWatch(config, port => allowed.ContainsKey(port) ? HdsFirewall.State.Present : HdsFirewall.State.Missing, port =>
+        {
+            var added = answer.Task.Result;
+            allowed[port] = true;
+            return added;
+        }, () => { });
+
+        watch.Refresh();
+        await WaitFor(() => watch.State == HdsFirewall.State.Missing);
+
+        var adding = watch.AddRuleAsync();
+        config.Hds.Port = 2000;
+        watch.Refresh();
+        await WaitFor(() => watch.State == HdsFirewall.State.Missing);
+
+        answer.SetResult(true);
+        await adding;
+
+        Assert.True(allowed.ContainsKey(1000));
+        Assert.Equal(HdsFirewall.State.Missing, watch.State);
+    }
+
     /// <summary>UAC で断られたら、前の答えのまま（見直さない）。</summary>
     [Fact]
     public async Task ADeclinedAddLeavesTheAnswerAsItWas()

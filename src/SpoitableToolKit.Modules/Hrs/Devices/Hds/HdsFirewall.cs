@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 using Microsoft.Extensions.Logging;
 
 namespace SpoitableToolKit.Modules.Hrs.Devices.Hds;
@@ -66,15 +67,7 @@ internal static class HdsFirewall
     /// </summary>
     public static State Check(int port, ILogger logger)
     {
-        var script = $$"""
-            $ErrorActionPreference = 'SilentlyContinue'
-            $exe = '{{Quote(Environment.ProcessPath ?? "")}}'
-            $rule = '{{Quote(RuleName(port))}}'
-            $actions = @()
-            if ($exe) { $actions += Get-NetFirewallApplicationFilter -Program $exe | Get-NetFirewallRule | Where-Object { $_.Direction -eq 'Inbound' -and $_.Enabled -eq 'True' } | ForEach-Object { $_.Action.ToString() } }
-            $actions += Get-NetFirewallRule -DisplayName $rule | Where-Object { $_.Direction -eq 'Inbound' -and $_.Enabled -eq 'True' } | ForEach-Object { $_.Action.ToString() }
-            if ($actions -contains 'Block') { 'blocked' } elseif ($actions -contains 'Allow') { 'present' } else { 'missing' }
-            """;
+        var script = CheckScript(port, Environment.ProcessPath ?? "");
 
         try
         {
@@ -87,6 +80,10 @@ internal static class HdsFirewall
             });
 
             if (process is null) return State.Failed;
+
+            // エラーの出力も読み捨てる。読まないと、溜まったところで PowerShell が書けずに止まり、こちらも答えを待ったまま止まる。
+            process.ErrorDataReceived += (_, _) => { };
+            process.BeginErrorReadLine();
 
             var output = process.StandardOutput.ReadToEnd().Trim();
             process.WaitForExit(TimeSpan.FromSeconds(30));
@@ -122,16 +119,7 @@ internal static class HdsFirewall
     /// </summary>
     public static bool Fix(int port, ILogger logger)
     {
-        var script = $$"""
-            try {
-            $exe = '{{Quote(Environment.ProcessPath ?? "")}}'
-            $rule = '{{Quote(RuleName(port))}}'
-            if ($exe) { Get-NetFirewallApplicationFilter -Program $exe -ErrorAction SilentlyContinue | Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' } | Remove-NetFirewallRule -ErrorAction SilentlyContinue }
-            Remove-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue
-            New-NetFirewallRule -DisplayName $rule -Description '{{Quote(Description(port))}}' -Direction Inbound -Action Allow -Protocol TCP -LocalPort {{port}} -Profile Private,Domain -ErrorAction Stop | Out-Null
-            exit 0
-            } catch { exit 1 }
-            """;
+        var script = FixScript(port, Environment.ProcessPath ?? "");
 
         try
         {
@@ -175,13 +163,42 @@ internal static class HdsFirewall
         $"New-NetFirewallRule -DisplayName '{RuleName(port)}' -Description '{Description(port)}' "
         + $"-Direction Inbound -Action Allow -Protocol TCP -LocalPort {port} -Profile Private,Domain";
 
-    /// <summary>
-    /// 複数行の script を <c>-Command</c> の 1 つの引数に畳む。
-    /// <b>改行はセミコロンに置き換える</b>（引数に改行をそのまま入れると途中で切れる）。
-    /// </summary>
-    private static string Arguments(string script) =>
-        $"-NoProfile -NonInteractive -Command \"{script.ReplaceLineEndings("; ").Replace("\"", "\\\"")}\"";
+    /// <summary>見る script（<see cref="Check"/>）。外から来た字（実行ファイルのパス）は <see cref="Literal"/> で入れる。</summary>
+    internal static string CheckScript(int port, string exe) => $$"""
+        $ErrorActionPreference = 'SilentlyContinue'
+        $exe = {{Literal(exe)}}
+        $rule = {{Literal(RuleName(port))}}
+        $actions = @()
+        if ($exe) { $actions += Get-NetFirewallApplicationFilter -Program $exe | Get-NetFirewallRule | Where-Object { $_.Direction -eq 'Inbound' -and $_.Enabled -eq 'True' } | ForEach-Object { $_.Action.ToString() } }
+        $actions += Get-NetFirewallRule -DisplayName $rule | Where-Object { $_.Direction -eq 'Inbound' -and $_.Enabled -eq 'True' } | ForEach-Object { $_.Action.ToString() }
+        if ($actions -contains 'Block') { 'blocked' } elseif ($actions -contains 'Allow') { 'present' } else { 'missing' }
+        """;
 
-    /// <summary>PowerShell の単引用符の中に入れる。中の <c>'</c> は 2 つ重ねて逃がす。</summary>
-    private static string Quote(string value) => value.Replace("'", "''");
+    /// <summary>直す script（<see cref="Fix"/>。<b>管理者で走る</b>）。外から来た字は <see cref="Literal"/> で入れる。</summary>
+    internal static string FixScript(int port, string exe) => $$"""
+        try {
+        $exe = {{Literal(exe)}}
+        $rule = {{Literal(RuleName(port))}}
+        if ($exe) { Get-NetFirewallApplicationFilter -Program $exe -ErrorAction SilentlyContinue | Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' } | Remove-NetFirewallRule -ErrorAction SilentlyContinue }
+        Remove-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue
+        New-NetFirewallRule -DisplayName $rule -Description {{Literal(Description(port))}} -Direction Inbound -Action Allow -Protocol TCP -LocalPort {{port}} -Profile Private,Domain -ErrorAction Stop | Out-Null
+        exit 0
+        } catch { exit 1 }
+        """;
+
+    /// <summary>
+    /// script に字を入れる。<b>引用符で囲まずに base64 で渡し、script の中で戻す。</b>
+    /// PowerShell は <c>'</c> のほかに <c>‘ ’ ‚ ‛</c> も単引用符として読むので、<c>'</c> を逃がすだけだと、
+    /// パス（「Bob’s」のようなフォルダ）にそれが入ったところで文字列が閉じ、残りがコマンドとして走る（<see cref="Fix"/> では管理者で）。
+    /// base64 の字（英数字と <c>+ / =</c>）は、どの引用の決まりにも当たらない。
+    /// </summary>
+    internal static string Literal(string value) =>
+        $"([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{Convert.ToBase64String(Encoding.UTF8.GetBytes(value))}')))";
+
+    /// <summary>
+    /// powershell の引数。script は <c>-EncodedCommand</c>（UTF-16LE の base64）で渡す —
+    /// <c>-Command "…"</c> だと、script の中の <c>"</c> や改行をコマンドラインの決まりで逃がすことになる。
+    /// </summary>
+    internal static string Arguments(string script) =>
+        $"-NoProfile -NonInteractive -EncodedCommand {Convert.ToBase64String(Encoding.Unicode.GetBytes(script))}";
 }

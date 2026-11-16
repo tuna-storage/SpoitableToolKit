@@ -65,8 +65,6 @@ internal sealed class HdsFirewallWatch(HrsConfig config, Func<int, HdsFirewall.S
             // UAC の返事を待つので裏で。
             return _adding = Task.Run(() =>
             {
-                var generation = Interlocked.Increment(ref _generation);
-
                 // 直せたと言われても<b>見直す</b>。ブロックが残っていれば通れないままなので、
                 // 「足しました」とだけ出すと嘘になる。断られた（UAC で「いいえ」）ときは前の答えのまま。
                 if (!add(port))
@@ -75,7 +73,11 @@ internal sealed class HdsFirewallWatch(HrsConfig config, Func<int, HdsFirewall.S
                     return;
                 }
 
-                var state = check(port);
+                // 見直しの番号は<b>足し終わってから</b>取る。UAC の返事を待つ間（数分ありうる）に設定を適用し直すと見直しが走り、
+                // 押した時点の番号ではこの答えが捨てられて、足したのに「見当たりません」のまま残る。
+                // 見るのもいまの設定（待つ間にポートや入/切を変えていれば、そちらの話をする）。
+                var generation = Interlocked.Increment(ref _generation);
+                var state = config.Hds.Enabled ? check(config.Hds.Port) : HdsFirewall.State.Off;
                 if (Volatile.Read(ref _generation) == generation) Tell(state);
             });
         }
