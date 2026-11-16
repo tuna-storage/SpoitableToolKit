@@ -55,6 +55,14 @@ public sealed class HrsTabsTests(AppFixture app) : IClassFixture<AppFixture>, IA
         ?? throw new InvalidOperationException("心拍のパネルに frame が無い");
 
     /// <summary>
+    /// パネルの中で式が真になるまで待つ。<b>間隔で見に行く</b> — WaitForFunction の既定は requestAnimationFrame で見に行くが、
+    /// シェルが隠した iframe（display: none）では rAF が回らないので、待ち始めたあとに真になっても見られずに時間切れになる。
+    /// </summary>
+    private async Task WaitInPanelAsync(string expression) =>
+        await (await FrameAsync()).WaitForFunctionAsync(expression, null,
+            new FrameWaitForFunctionOptions { Timeout = 5_000, PollingInterval = 100 });
+
+    /// <summary>
     /// 心拍計の一覧を読み直す口だけを包み、渡した JS の式（呼ばれるたびに評価する）で答える。呼ばれた口の名前は <c>__calls</c> に積む。
     /// 「〜前」は手元の時計で数えるので、時刻は呼ばれたときの <c>Date.now()</c> から作る。
     /// Apple Watch (HDS) の欄は、そのとき <c>window.__hds</c> に置いてあるもの（置いていなければ HDS が OFF と同じ）。
@@ -202,16 +210,15 @@ public sealed class HrsTabsTests(AppFixture app) : IClassFixture<AppFixture>, IA
 
         await Panel.Locator("#tabMonitors").ClickAsync();
         await Assertions.Expect(Rows.Nth(0).Locator(".signal")).ToHaveTextAsync("-50 dBm");
-        var frame = await FrameAsync();
-        await frame.WaitForFunctionAsync("() => __monitors.watching", null, new FrameWaitForFunctionOptions { Timeout = 5_000 });
+        await WaitInPanelAsync("() => __monitors.watching");
 
         await Page.Locator("#sidebar .item[data-id='log']").ClickAsync();
-        await frame.WaitForFunctionAsync("() => !__monitors.watching", null, new FrameWaitForFunctionOptions { Timeout = 5_000 });
+        await WaitInPanelAsync("() => !__monitors.watching");
         var hidden = await Rows.Nth(0).Locator(".signal").TextContentAsync();
 
         // 戻ったら、次の周期を待たずに 1 回読む（答えるたびに電波の強さが変わる）。
         await Page.Locator("#sidebar .item[data-id='hrs']").ClickAsync();
-        await frame.WaitForFunctionAsync("() => __monitors.watching", null, new FrameWaitForFunctionOptions { Timeout = 5_000 });
+        await WaitInPanelAsync("() => __monitors.watching");
         await Assertions.Expect(Rows.Nth(0).Locator(".signal")).Not.ToHaveTextAsync(hidden!, new() { Timeout = 2_000 });
     }
 
