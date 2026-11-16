@@ -98,54 +98,66 @@ internal sealed class HdsFirewallWatch(HrsConfig config, Func<int, HdsFirewall.S
 
         return _state switch
         {
-            HdsFirewall.State.Off => new SpoitableSettingsActionState(
-                Tone: SpoitableSettingsTone.Neutral,
-                Status: text["hrs.settings.hds.firewall.off"],
-                Detail: text["hrs.settings.hds.firewall.offDetail"],
-                Button: null,
-                ButtonNote: null,
-                Copy: null),
+            HdsFirewall.State.Off => new SpoitableSettingsActionState
+            {
+                Tone = SpoitableSettingsTone.Neutral,
+                Status = text["hrs.settings.hds.firewall.off"],
+                Detail = text["hrs.settings.hds.firewall.offDetail"],
+                Button = null,
+                ButtonNote = null,
+                Copy = null,
+            },
 
-            HdsFirewall.State.Checking => new SpoitableSettingsActionState(
-                Tone: SpoitableSettingsTone.Neutral,
-                Status: text["hrs.settings.hds.firewall.checking"],
-                Detail: null,
-                Button: null,
-                ButtonNote: null,
-                Copy: null),
+            HdsFirewall.State.Checking => new SpoitableSettingsActionState
+            {
+                Tone = SpoitableSettingsTone.Neutral,
+                Status = text["hrs.settings.hds.firewall.checking"],
+                Detail = null,
+                Button = null,
+                ButtonNote = null,
+                Copy = null,
+            },
 
-            HdsFirewall.State.Present => new SpoitableSettingsActionState(
-                Tone: SpoitableSettingsTone.Good,
-                Status: text["hrs.settings.hds.firewall.present"],
-                Detail: text.Format("hrs.settings.hds.firewall.presentDetail", port),
-                Button: null,
-                ButtonNote: null,
-                Copy: null),
+            HdsFirewall.State.Present => new SpoitableSettingsActionState
+            {
+                Tone = SpoitableSettingsTone.Good,
+                Status = text["hrs.settings.hds.firewall.present"],
+                Detail = text.Format("hrs.settings.hds.firewall.presentDetail", port),
+                Button = null,
+                ButtonNote = null,
+                Copy = null,
+            },
 
-            HdsFirewall.State.Missing => new SpoitableSettingsActionState(
-                Tone: SpoitableSettingsTone.Warn,
-                Status: text["hrs.settings.hds.firewall.missing"],
-                Detail: text.Format("hrs.panel.firewall.missing", port),
-                Button: text["hrs.panel.firewall.add"],
-                ButtonNote: text["hrs.panel.firewall.uac"],
-                Copy: HdsFirewall.CommandFor(port)),
+            HdsFirewall.State.Missing => new SpoitableSettingsActionState
+            {
+                Tone = SpoitableSettingsTone.Warn,
+                Status = text["hrs.settings.hds.firewall.missing"],
+                Detail = text.Format("hrs.panel.firewall.missing", port),
+                Button = text["hrs.panel.firewall.add"],
+                ButtonNote = text["hrs.panel.firewall.uac"],
+                Copy = HdsFirewall.CommandFor(port),
+            },
 
-            HdsFirewall.State.Blocked => new SpoitableSettingsActionState(
-                Tone: SpoitableSettingsTone.Bad,
-                Status: text["hrs.settings.hds.firewall.blocked"],
-                Detail: text.Format("hrs.panel.firewall.blocked", port),
-                Button: text["hrs.panel.firewall.unblock"],
-                ButtonNote: text["hrs.panel.firewall.uac"],
-                Copy: null),
+            HdsFirewall.State.Blocked => new SpoitableSettingsActionState
+            {
+                Tone = SpoitableSettingsTone.Bad,
+                Status = text["hrs.settings.hds.firewall.blocked"],
+                Detail = text.Format("hrs.panel.firewall.blocked", port),
+                Button = text["hrs.panel.firewall.unblock"],
+                ButtonNote = text["hrs.panel.firewall.uac"],
+                Copy = null,
+            },
 
             // 読めなかった。届かないと決まったわけではないので、直すボタンは出さずに、手で確かめる先だけ言う。
-            _ => new SpoitableSettingsActionState(
-                Tone: SpoitableSettingsTone.Neutral,
-                Status: text["hrs.settings.hds.firewall.failed"],
-                Detail: text.Format("hrs.settings.hds.firewall.failedDetail", port),
-                Button: null,
-                ButtonNote: null,
-                Copy: null),
+            _ => new SpoitableSettingsActionState
+            {
+                Tone = SpoitableSettingsTone.Neutral,
+                Status = text["hrs.settings.hds.firewall.failed"],
+                Detail = text.Format("hrs.settings.hds.firewall.failedDetail", port),
+                Button = null,
+                ButtonNote = null,
+                Copy = null,
+            },
         };
     }
 

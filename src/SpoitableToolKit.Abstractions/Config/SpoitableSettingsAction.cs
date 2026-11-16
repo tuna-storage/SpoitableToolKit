@@ -18,13 +18,15 @@ namespace SpoitableToolKit.Abstractions.Config;
 ///
 /// // OnInit で、ISpoitableModule.Config で返す本物の設定にだけ結ぶ
 /// _config.Hds.Firewall.Bind(
-///     describe: text =&gt; new SpoitableSettingsActionState(
-///         Tone: SpoitableSettingsTone.Warn,
-///         Status: text["hrs.settings.hds.firewall.missing"],
-///         Detail: text.Format("hrs.panel.firewall.missing", _config.Hds.Port),
-///         Button: text["hrs.panel.firewall.add"],
-///         ButtonNote: text["hrs.panel.firewall.uac"],
-///         Copy: null),
+///     describe: text =&gt; new SpoitableSettingsActionState
+///     {
+///         Tone = SpoitableSettingsTone.Warn,
+///         Status = text["hrs.settings.hds.firewall.missing"],
+///         Detail = text.Format("hrs.panel.firewall.missing", _config.Hds.Port),
+///         Button = text["hrs.panel.firewall.add"],
+///         ButtonNote = text["hrs.panel.firewall.uac"],
+///         Copy = null,
+///     },
 ///     run: () =&gt; _firewall.AddRuleAsync());
 ///
 /// // 状態が変わったら（どのスレッドからでもよい）

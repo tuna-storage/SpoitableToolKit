@@ -67,7 +67,7 @@ public sealed class SettingsActionTests
     private static readonly FakeLocalizer Text = new();
 
     private static SpoitableSettingsActionState State(string status = "s") =>
-        new(Tone: SpoitableSettingsTone.Warn, Status: status, Detail: "d", Button: "b", ButtonNote: "n", Copy: "c");
+        new() { Tone = SpoitableSettingsTone.Warn, Status = status, Detail = "d", Button = "b", ButtonNote = "n", Copy = "c" };
 
     private static JsonObject Json(string json) => (JsonObject)JsonNode.Parse(json)!;
 
@@ -218,8 +218,10 @@ public sealed class SettingsActionTests
     public void TheRowCarriesItsStateAndWhereItSits()
     {
         var config = new Config();
-        config.Net.Gate.Bind(text => new SpoitableSettingsActionState(
-            Tone: SpoitableSettingsTone.Warn, Status: text["s"], Detail: "d", Button: "b", ButtonNote: "n", Copy: "c"), () => Task.CompletedTask);
+        config.Net.Gate.Bind(text => new SpoitableSettingsActionState
+        {
+            Tone = SpoitableSettingsTone.Warn, Status = text["s"], Detail = "d", Button = "b", ButtonNote = "n", Copy = "c",
+        }, () => Task.CompletedTask);
 
         var row = Item(new ModuleConfigBinding(config, NullLogger.Instance).Describe(Text), "Net.Gate");
 
@@ -281,6 +283,25 @@ public sealed class SettingsActionTests
         Assert.Contains(logs.Errors, e => e.Contains("'Inner'"));
         Assert.Contains(logs.Errors, e => e.Contains("'Later'"));
         Assert.Contains(logs.Errors, e => e.Contains("'Wrong'") && e.Contains("nameof(Port)") && e.Contains("Settings of Broken: Port"));
+    }
+
+    /// <summary>
+    /// 姿の 6 つの欄は全部 required（書き忘れはモジュールの build で止まる。出さない欄も <c>= null</c> と書かせる）。
+    /// 位置引数の constructor は持たない — あとで足す欄を required にしなければ、足しても SDK を壊さない。
+    /// </summary>
+    [Fact]
+    public void EveryFieldOfTheStateHasToBeWritten()
+    {
+        var type = typeof(SpoitableSettingsActionState);
+
+        var required = type.GetProperties()
+            .Where(p => p.IsDefined(typeof(System.Runtime.CompilerServices.RequiredMemberAttribute), inherit: false))
+            .Select(p => p.Name)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(["Button", "ButtonNote", "Copy", "Detail", "Status", "Tone"], required);
+        Assert.All(type.GetConstructors(), constructor => Assert.Empty(constructor.GetParameters()));
     }
 
     [Fact]
@@ -407,8 +428,10 @@ public sealed class SettingsActionTests
     public void ANoteWithoutAButtonIsDropped()
     {
         var config = new Config();
-        config.Net.Gate.Bind(_ => new SpoitableSettingsActionState(
-            Tone: SpoitableSettingsTone.Good, Status: "s", Detail: null, Button: null, ButtonNote: "n", Copy: null), () => Task.CompletedTask);
+        config.Net.Gate.Bind(_ => new SpoitableSettingsActionState
+        {
+            Tone = SpoitableSettingsTone.Good, Status = "s", Detail = null, Button = null, ButtonNote = "n", Copy = null,
+        }, () => Task.CompletedTask);
 
         var state = StateOf(Item(new ModuleConfigBinding(config, NullLogger.Instance).Describe(Text), "Net.Gate"));
 
