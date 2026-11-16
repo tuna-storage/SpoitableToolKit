@@ -43,10 +43,30 @@ internal sealed class ConfigMemberCollector
             return;
         }
 
+        List<ConfigMember> actions = [];
+
         foreach (var member in instance.GetType()
                      .GetMembers(BindingFlags.Public | BindingFlags.Instance)
                      .Where(m => m.MemberType is MemberTypes.Field or MemberTypes.Property))
         {
+            // 動きの行がいちばん先。**型で見分ける** — readonly でなくても値の側へ落とさない（落ちると JSON の欄になって保存され、
+            // 読み込みで結んだ本物が上書きされる）。readonly なら、下の「書けない」の警告にも行かない。
+            if (ConfigMember.TryCreateAction(member, out var action))
+            {
+                Attach(action, instance, section, prefix, namePrefix);
+
+                if (action.GetValue(instance) is null)
+                {
+                    logger.LogWarning("{Path} is null; skipping the row. Create it where it is declared: = new(dependsOn: [...])", action.Path);
+                    continue;
+                }
+
+                // 並び（画面の順）にだけ入れる。設定の一覧に入れないので、保存・読み込み・適用・写しのどれにも乗らない。
+                _order.Add(action);
+                actions.Add(action);
+                continue;
+            }
+
             // 入れ物が先。**書けなくてもよい**ので、書ける条件で弾かれる前に見る。
             if (ConfigMember.TryCreateSection(member, out var box))
             {
@@ -86,6 +106,37 @@ internal sealed class ConfigMemberCollector
                 logger.LogWarning("{Type}.{Member} is not writable; not treated as a setting",
                     instance.GetType().Name, member.Name);
         }
+
+        // 前提の名前は、この入れ物の項目を全部集めてから確かめる（後ろに宣言した設定も指せる）。
+        foreach (var action in actions)
+            action.DependsOn = DependsOnOf(action, instance, logger);
+    }
+
+    /// <summary>
+    /// 動きの行の前提（<see cref="SpoitableSettingsAction.DependsOn"/>）を、画面の宛先（<see cref="ConfigMember.Path"/>）にする。
+    /// 指せるのは<b>同じ入れ物の設定</b>だけ（入れ物・ほかの動きの行・別のクラスの設定は指せない）。指せない名前はエラーに残して外す — 行そのものは出す。
+    /// </summary>
+    private string[] DependsOnOf(ConfigMember action, object instance, ILogger logger)
+    {
+        var settings = _members.Where(m => m.Owner == instance).ToArray();
+        List<string> paths = [];
+
+        foreach (var name in ((SpoitableSettingsAction)action.GetValue(instance)!).DependsOn)
+        {
+            if (settings.FirstOrDefault(m => m.Name == name) is { } found)
+            {
+                if (!paths.Contains(found.Path)) paths.Add(found.Path);
+                continue;
+            }
+
+            logger.LogError(
+                "{Type}.{Member}: dependsOn names '{Name}', which is not a setting of {Owner}; ignoring it. " +
+                "Name settings of the same class with nameof, e.g. new(dependsOn: [nameof(Port)]). Settings of {Class}: {Settings}",
+                instance.GetType().Name, action.Name, name, instance.GetType().Name, instance.GetType().Name,
+                settings.Length == 0 ? "(none)" : string.Join(", ", settings.Select(m => m.Name)));
+        }
+
+        return [.. paths];
     }
 
     /// <summary>

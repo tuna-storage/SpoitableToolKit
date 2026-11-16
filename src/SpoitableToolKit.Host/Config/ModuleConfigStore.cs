@@ -6,6 +6,7 @@ using SpoitableToolKit.Abstractions.Config;
 using SpoitableToolKit.Abstractions.Events;
 using SpoitableToolKit.Abstractions.Events.Config;
 using SpoitableToolKit.Abstractions.Localization;
+using SpoitableToolKit.Host.Config.Actions;
 using SpoitableToolKit.Host.Config.Interfaces;
 using SpoitableToolKit.Host.Config.Models;
 using SpoitableToolKit.Host.Events;
@@ -59,6 +60,13 @@ internal sealed class ModuleConfigStore(EventHubs hubs, ILoggerFactory loggerFac
 
         if (Read(file) is { } saved) binding.Load(saved, _logger);
 
+        // 動きの行の「変わった」を受ける。モジュールが結ぶのは OnInit（このあと）なので、先に張っておく。
+        foreach (var action in binding.Actions)
+        {
+            action.ModuleId = moduleId;
+            action.Row.Listen(() => Notify(moduleId, action));
+        }
+
         var channel = ConfigChannel.Create(hubs, type);
         lock (_gate)
         {
@@ -109,7 +117,64 @@ internal sealed class ModuleConfigStore(EventHubs hubs, ILoggerFactory loggerFac
             _entries.RemoveAll(removed.Contains);
         }
 
-        foreach (var entry in removed) entry.Channel.Close();
+        foreach (var entry in removed)
+        {
+            entry.Channel.Close();
+
+            // 外したモジュールの Changed() が、画面に残っていない行を描きに来ないように。
+            foreach (var action in entry.Binding.Actions) action.Row.Listen(null);
+        }
+    }
+
+    /// <summary>
+    /// 動きの行が変わったことを画面へ流す係。窓口と同じ頃（設定より後）に出来るので後から挿す。挿す前の「変わった」は捨てる
+    /// （画面は開いたときに <see cref="Describe"/> で読み直す）。
+    /// </summary>
+    internal IConfigActionSink? ActionSink { get; set; }
+
+    /// <summary>1 つの行のいまの姿（push の材料）。無い行なら <c>null</c>。モジュールの describe は lock の外で呼ぶ。</summary>
+    public ConfigActionView? DescribeAction(string moduleId, string key, ILocalizer text) =>
+        FindAction(moduleId, key)?.View(text);
+
+    /// <summary>
+    /// 動きの行のボタン。<b>待たない</b> — 走らせるのは裏で、走り始めと終わりに画面へ流す。
+    /// 走っている間の押し・結んでいない行・無い行は何もしない（false）。
+    /// </summary>
+    public bool RunAction(string moduleId, string key)
+    {
+        if (FindAction(moduleId, key) is not { } action)
+        {
+            _logger.LogWarning("The screen pressed an action that does not exist: {Module} {Key}", moduleId, key);
+            return false;
+        }
+
+        return action.TryStart(() => Notify(moduleId, action));
+    }
+
+    private ConfigAction? FindAction(string moduleId, string key)
+    {
+        lock (_gate) return Find(moduleId)?.Binding.Actions.FirstOrDefault(a => a.Path == key);
+    }
+
+    /// <summary>
+    /// 画面へ流す。<b>呼んだ側の手元では describe を走らせない</b> — モジュールが自分の lock を持ったまま <c>Changed()</c> を呼ぶと、
+    /// その手元で describe（同じ lock を取りに行く）を呼べば止まる。
+    /// </summary>
+    private void Notify(string moduleId, ConfigAction action)
+    {
+        if (ActionSink is not { } sink) return;
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                sink.Changed(moduleId, action.Path);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not show the new state of {Module} {Key}", moduleId, action.Path);
+            }
+        });
     }
 
     internal int? ListenerCount(string moduleId)

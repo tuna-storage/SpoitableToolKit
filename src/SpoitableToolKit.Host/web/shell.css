@@ -640,6 +640,28 @@ button.drow:hover { background: var(--hover); }
 /* 入れ子の見出し。値を持たないので入力の欄は出さず、下に並ぶものの親として置く。 */
 .cfg-section > .meta > .name { font-weight: 600; }
 
+/* 値ではない行（SpoitableSettingsAction）。札は右、説明・ボタン・コピーは下に横幅いっぱい。
+   札の色は状態の口（.spoitable-state）と同じ 4 つの重さ。--tone-* はログの種別の色なので使わない。 */
+.cfg-action-state {
+  padding: 0 .5em; border: 1px solid color-mix(in srgb, currentColor 45%, transparent); border-radius: .3em;
+  color: var(--muted); font-size: .8em; font-weight: 600; line-height: 1.7; white-space: nowrap;
+}
+.cfg-action-state[data-tone="good"] { color: var(--good); }
+.cfg-action-state[data-tone="warn"] { color: var(--warn); }
+.cfg-action-state[data-tone="bad"] { color: var(--bad); }
+.cfg-action-body { flex: 1 1 100%; min-width: 0; display: flex; flex-direction: column; gap: .55em; }
+.cfg-action-detail { display: block; color: var(--muted); font-size: .86em; line-height: 1.55; }
+.cfg-action-acts { display: flex; flex-wrap: wrap; align-items: center; gap: .4em .75em; }
+.cfg-action-note, .cfg-action-wait { color: var(--muted); font-size: .84em; }
+.cfg-action-wait { font-weight: 600; }
+.cfg-action-copy { display: flex; align-items: flex-start; gap: .5em; min-width: 0; }
+/* 長いコマンドは折り返す（折り返さないと、VR の窓の幅で横に巻くことになる）。 */
+.cfg-action-copy code {
+  flex: 1; min-width: 0; padding: .4em .6em; border: 1px solid var(--border); border-radius: .45em; background: var(--bg);
+  font-family: var(--font-mono); font-size: .8em; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text;
+}
+.cfg-action-copy .spoitable-btn { flex: none; }
+
 /* 子の項目は見出しの下に吊るした囲み（左に字下げ・枠・一段暗い地・角丸）。 */
 .cfg-item[data-depth] {
   margin: 0 1em 0 2.7em; border: 1px solid var(--border); border-top-color: var(--soft); border-bottom: 0;

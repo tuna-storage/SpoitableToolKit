@@ -13,4 +13,7 @@ internal static class ConfigKind
     public const string Json = "json";
 
     public const string Section = "section";
+
+    /// <summary>値ではない行（<see cref="SpoitableToolKit.Abstractions.Config.SpoitableSettingsAction"/>）。保存も「適用」もしない。</summary>
+    public const string Action = "action";
 }

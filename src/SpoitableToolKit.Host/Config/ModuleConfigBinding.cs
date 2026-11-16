@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SpoitableToolKit.Abstractions.Config;
 using SpoitableToolKit.Abstractions.Events.Config;
 using SpoitableToolKit.Abstractions.Localization;
+using SpoitableToolKit.Host.Config.Actions;
 using SpoitableToolKit.Host.Config.Binding;
 using SpoitableToolKit.Host.Config.Models;
 
@@ -25,6 +26,11 @@ internal sealed class ModuleConfigBinding
     /// 引き換えに、候補をほかの設定の値で変える設定は、下見の途中の値では候補が変わらない（<see cref="IModuleConfig.SuggestValuesFor"/> に書いてある）。
     /// </summary>
     private IModuleConfig SuggestionSource { get; init; }
+
+    /// <summary>
+    /// 動きの行の本物。写し（<see cref="Copy"/>）も本物を指す — 写しの行は <c>new</c> で作り直されたもので、モジュールは本物にしか結ばない。
+    /// </summary>
+    private IReadOnlyList<ConfigAction> ActionSource { get; init; }
 
     private readonly IReadOnlyList<ConfigMember> _members;
 
@@ -47,16 +53,25 @@ internal sealed class ModuleConfigBinding
 
         (_members, _order) = ConfigMemberCollector.Collect(instance, collectLogger);
 
-        // 候補の相手は読むときに引く（写しは、作ったあとに本物へ向け直す）。
-        _describer = new ConfigDescriber(_members, _order, () => SuggestionSource, logger);
+        ActionSource =
+        [
+            .. _order.Where(m => m.IsAction)
+                .Select(m => new ConfigAction(m, (SpoitableSettingsAction)m.GetValue(m.Owner)!, logger)),
+        ];
+
+        // 候補と動きの行の相手は読むときに引く（写しは、作ったあとに本物へ向け直す）。
+        _describer = new ConfigDescriber(_members, _order, () => SuggestionSource, () => ActionSource, logger);
     }
 
     public IReadOnlyList<ConfigMember> Members => _members;
 
+    /// <summary>動きの行（本物）。設定の一覧（<see cref="Members"/>）には入っていない。</summary>
+    public IReadOnlyList<ConfigAction> Actions => ActionSource;
+
     public IModuleConfig Instance => _instance;
 
     /// <summary>入れ子を持っているか。持たない設定では聞き直しを 1 回も走らせない。</summary>
-    public bool HasSections => _order.Count != _members.Count;
+    public bool HasSections => _order.Any(m => m.IsSection);
 
     public void Load(JsonObject saved, ILogger logger) => ConfigJson.Load(_members, saved, logger);
 
@@ -151,7 +166,7 @@ internal sealed class ModuleConfigBinding
     private ModuleConfigBinding Copy()
     {
         var copy = (IModuleConfig)Activator.CreateInstance(_instance.GetType())!;
-        var binding = new ModuleConfigBinding(copy, _logger, NullLogger.Instance) { SuggestionSource = _instance };
+        var binding = new ModuleConfigBinding(copy, _logger, NullLogger.Instance) { SuggestionSource = _instance, ActionSource = ActionSource };
         binding.Load(Save(), NullLogger.Instance);
         return binding;
     }

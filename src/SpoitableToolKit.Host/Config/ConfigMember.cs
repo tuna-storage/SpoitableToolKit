@@ -75,7 +75,9 @@ internal sealed class ConfigMember
         // その入れ物が切でも出す。スイッチが入れ物の中にあると、切にした瞬間にスイッチごと消えて戻せなくなる。
         Toggle = member.GetCustomAttribute<SpoitableSettingsToggleAttribute>() is not null;
 
-        Kind = KindOf(type);
+        IsAction = type == typeof(SpoitableSettingsAction);
+
+        Kind = IsAction ? ConfigKind.Action : KindOf(type);
         Choices = ChoicesOf(type);
 
         if (Kind == ConfigKind.List && ItemTypeOf(type) is { } item)
@@ -137,6 +139,12 @@ internal sealed class ConfigMember
 
     public bool IsSectionSwitch { get; }
 
+    /// <summary>値ではない行（<see cref="SpoitableSettingsAction"/>）。設定の一覧（保存・読み込み・適用・写し）には入らず、並び（画面の順）にだけ入る。</summary>
+    public bool IsAction { get; }
+
+    /// <summary>動きの行が前提にしている設定の宛先（<see cref="Path"/>。画面の溜めはこの名前で持つ）。組み立てで確かめたものだけ。</summary>
+    public string[] DependsOn { get; internal set; } = [];
+
     /// <summary>入れ子だと入れ物の方になるので、読み書きは根の設定ではなくこちらへ通す。</summary>
     public object Owner { get; internal set; } = null!;
 
@@ -164,6 +172,30 @@ internal sealed class ConfigMember
             case PropertyInfo { CanRead: true } property
                 when property.GetIndexParameters().Length == 0
                     && typeof(ISpoitableSettings).IsAssignableFrom(property.PropertyType):
+                bound = new ConfigMember(member, property.PropertyType, null, property);
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// 動きの行（<see cref="SpoitableSettingsAction"/>）。<b>型で見分けて、値の判定より先に見る</b> — readonly でなくても値として扱わない
+    /// （値の側へ落ちると JSON の欄になって config.json に書かれ、読み込みで結んだ本物が上書きされる）。読めれば足りる。
+    /// </summary>
+    public static bool TryCreateAction(MemberInfo member, out ConfigMember bound)
+    {
+        bound = null!;
+
+        switch (member)
+        {
+            case FieldInfo field when field.FieldType == typeof(SpoitableSettingsAction):
+                bound = new ConfigMember(member, field.FieldType, field, null);
+                return true;
+
+            case PropertyInfo { CanRead: true } property
+                when property.GetIndexParameters().Length == 0 && property.PropertyType == typeof(SpoitableSettingsAction):
                 bound = new ConfigMember(member, property.PropertyType, null, property);
                 return true;
 

@@ -1811,6 +1811,9 @@ window.stk = {
       } else {
         refresh();
       }
+    } else if (channel === 'configAction') {
+      // 設定画面の動きの行が変わった。**その行だけ**を描き直す（画面ごと読み直すと、溜めてある変更が消える）。
+      applyActionPush(payload);
     } else if (channel === 'modulePush') {
       deliverPush(payload);
     } else if (channel === 'status') {
@@ -3532,6 +3535,7 @@ function markPending(module, key, value, row, original) {
 
   row.classList.toggle('dirty', pending.has(id));
   renderApplyBar();
+  paintActions();
   refreshVisibility();
 }
 
@@ -3798,6 +3802,11 @@ function renderConfigItem(module, item) {
     return wrap;
   }
 
+  if (item.kind === 'action') {
+    renderActionItem(module, item, row, meta);
+    return wrap;
+  }
+
   // 値は JSON 文字列で来る（C# の型のまま JS へ渡せないため）。
   // 「元の値」は、断られた欄を打った値のまま描き直したときだけ別に来る（保存済みの値。元に戻したら溜めから外す、のため）。
   const value = JSON.parse(item.value);
@@ -3820,6 +3829,118 @@ function renderConfigItem(module, item) {
   if (item.kind === 'list' && !opensModal(item)) row.classList.add('wide');
 
   return wrap;
+}
+
+// 値ではない行（SpoitableSettingsAction）。札・説明・押すとその場で動くボタン・コピーできる 1 行。
+// **「適用」にも溜めにも乗らない。** ボタンは押した瞬間に C# で走り、行の姿は configAction の push で全部の面へ届く
+// （走っている間は、押した面だけでなく全部の面でボタンを押せない）。
+// 姿は作った順の番号（seq）を持つ。設定の材料を取りに行っている間に届いた push を古い材料で描き戻さないよう、大きい方を残す。
+
+const actionStates = new Map();   // pendingKey(module, key) → いちばん新しい姿
+
+/** 新しい方を覚えて返す。古い姿（seq が小さい）は捨てる。 */
+function keepNewerAction(module, key, state) {
+  const id = pendingKey(module, key);
+  const known = actionStates.get(id);
+  if (state && !(known && known.seq >= state.seq)) actionStates.set(id, state);
+}
+
+function renderActionItem(module, item, row, meta) {
+  row.classList.add('cfg-action');
+  row._dependsOn = item.dependsOn ?? [];
+
+  // 札は右（ほかの行の入力と同じ場所）。説明・ボタン・コピーは下に横幅いっぱい（VR の窓の狭い幅でも折り返す）。
+  const control = document.createElement('div');
+  control.className = 'ctl';
+  const badge = cell('cfg-action-state', '');
+  control.appendChild(badge);
+
+  const body = document.createElement('div');
+  body.className = 'cfg-action-body';
+  const detail = cell('cfg-action-detail', '');
+
+  const acts = document.createElement('div');
+  acts.className = 'cfg-action-acts';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'spoitable-btn spoitable-btn-small cfg-action-run';
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+
+    // 走り始めと終わりは push で届く。断られた（もう走っている・結ばれていない）ときは、覚えている姿に戻す。
+    if (!await bridge.runConfigAction(module, item.key)) paintAction(module, row);
+  });
+
+  // 前提の設定を変えて、まだ適用していない間はボタンの代わりにこれを出す（姿はまだ前の値の話をしている）。
+  const wait = cell('cfg-action-wait', t('host.settings.action.applyFirst'));
+  const note = cell('cfg-action-note', '');
+  acts.append(button, wait, note);
+
+  const copyLine = document.createElement('div');
+  copyLine.className = 'cfg-action-copy';
+  const code = document.createElement('code');
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'spoitable-btn spoitable-btn-small cfg-action-copy-btn';
+  copy.textContent = t('common.ui.copy');
+  copy.addEventListener('click', async () => {
+    const state = actionStates.get(pendingKey(module, item.key));
+    if (!state?.copy || !await bridge.copyToClipboard(state.copy)) return;
+    copy.textContent = t('common.ui.copied');
+    setTimeout(() => { copy.textContent = t('common.ui.copy'); }, 1500);
+  });
+  copyLine.append(code, copy);
+
+  body.append(detail, acts, copyLine);
+  row.append(meta, control, body);
+  row._action = { badge, body, detail, acts, button, wait, note, copyLine, code };
+
+  keepNewerAction(module, item.key, item.state ? JSON.parse(item.state) : null);
+  paintAction(module, row);
+}
+
+/** 覚えている姿を行に当てる。溜めの有無で変わるので、溜めが変わるたびにも呼ぶ（paintActions）。 */
+function paintAction(module, row) {
+  const parts = row._action;
+  if (!parts) return;
+
+  const state = actionStates.get(pendingKey(module, row.dataset.key)) ?? null;
+  const waiting = row._dependsOn.some(key => pending.has(pendingKey(module, key)));
+  const hasButton = !!state?.button;
+
+  parts.badge.hidden = !state;
+  parts.badge.dataset.tone = state?.tone ?? 'neutral';
+  parts.badge.textContent = state?.status ?? '';
+
+  parts.detail.hidden = !state?.detail;
+  parts.detail.textContent = state?.detail ?? '';
+
+  parts.acts.hidden = !hasButton;
+  parts.button.hidden = waiting;
+  parts.button.textContent = state?.button ?? '';
+  parts.button.disabled = !!state?.running;
+  parts.wait.hidden = !waiting;
+  parts.note.hidden = waiting || !state?.buttonNote;
+  parts.note.textContent = state?.buttonNote ?? '';
+
+  parts.copyLine.hidden = !state?.copy;
+  parts.code.textContent = state?.copy ?? '';
+
+  parts.body.hidden = !(state?.detail || hasButton || state?.copy);
+}
+
+function paintActions() {
+  for (const group of el.cfgList.querySelectorAll('.cfg-group'))
+    for (const row of group.querySelectorAll('.cfg-item.cfg-action')) paintAction(group.dataset.module, row);
+}
+
+function applyActionPush({ module, key, state }) {
+  keepNewerAction(module, key, state);
+
+  // 本体の設定はページごとに段が分かれているが、宛先はモジュールの中で 1 つなので最初に当たった行でよい。
+  const row = el.cfgList.querySelector(
+    `.cfg-group[data-module="${CSS.escape(module)}"] .cfg-item[data-key="${CSS.escape(key)}"]`);
+  if (row) paintAction(module, row);
 }
 
 /// 入力中の一言（書きかけの JSON など）を、その項目の下に出して差し替える。
@@ -4914,6 +5035,7 @@ const bridge = (() => {
     previewConfigs: call('previewConfigs'),
     getStrings: call('getStrings'),
     applyConfigChanges: call('applyConfigChanges'),
+    runConfigAction: call('runConfigAction'),
     answerNotification: call('answerNotification'),
     optOutNotification: call('optOutNotification'),
     answerNotificationLate: call('answerNotificationLate'),

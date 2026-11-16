@@ -41,6 +41,15 @@
     <None Include="$(PkgMicrosoft_Extensions_Logging_Abstractions)\lib\net10.0\Microsoft.Extensions.Logging.Abstractions.xml" Pack="true" PackagePath="ref\net10.0\" Visible="false" />
   </ItemGroup>
 
+  <!--
+    ホストだけが使う口（SpoitableSettingsAction の結んだ中身を読む・「変わった」を受け取る）は internal にして、ホストと試験にだけ見せる。
+    public にすると、モジュールから呼べてしまう（モジュールを書く AI は、見える口を使い方だと読む）。package validation が比べるのは public の形だけ。
+  -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="SpoitableToolKit.Host" />
+    <InternalsVisibleTo Include="SpoitableToolKit.Tests" />
+  </ItemGroup>
+
   <PropertyGroup>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Copyright>Copyright (c) 2026 fltuna</Copyright>

@@ -181,6 +181,10 @@ internal static class Program
             .BuildServiceProvider();
 
         var configs = new ModuleConfigStore(hostEvents.Hubs, loggerFactory);
+
+        // 設定画面の動きの行（SpoitableSettingsAction）が変わったら、その 1 行だけを全部の面へ流す。モジュールが結ぶ（OnInit）より先に挿す。
+        configs.ActionSink = new ConfigActionPusher(broadcast, configs, text);
+
         var hostConfigEvents = configs.Add(HostConfig.Id, "Host", "⚙", hostConfig, AppPaths.DataDirectory,
             displayNameKey: "host.settings.title");
 

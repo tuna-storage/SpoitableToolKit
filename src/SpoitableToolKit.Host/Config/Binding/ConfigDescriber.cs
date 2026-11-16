@@ -3,14 +3,18 @@ using Microsoft.Extensions.Logging;
 using SpoitableToolKit.Abstractions.Config;
 using SpoitableToolKit.Abstractions.Config.Attributes;
 using SpoitableToolKit.Abstractions.Localization;
+using SpoitableToolKit.Host.Config.Actions;
 using SpoitableToolKit.Host.Config.Models;
+using SpoitableToolKit.Host.Ui.Push;
 
 namespace SpoitableToolKit.Host.Config.Binding;
 
+/// <param name="actionSource">動きの行の本物（<see cref="ConfigAction"/>）。写しの describer も本物を指す — 写しの行は結ばれていない。</param>
 internal sealed class ConfigDescriber(
     IReadOnlyList<ConfigMember> members,
     IReadOnlyList<ConfigMember> order,
     Func<IModuleConfig> suggestionSource,
+    Func<IReadOnlyList<ConfigAction>> actionSource,
     ILogger logger)
 {
     /// <summary>
@@ -44,6 +48,8 @@ internal sealed class ConfigDescriber(
                 group = GroupOf(m, text),
                 groupKey = GroupKeyOf(m),
             }
+            : m.IsAction
+            ? ActionRow(m, text)
             : new
             {
                 key = m.Path,
@@ -80,6 +86,31 @@ internal sealed class ConfigDescriber(
                 value = JsonSerializer.Serialize(m.GetValue(m.Owner), m.Type, ConfigJson.Options),
             }),
     ];
+
+    /// <summary>
+    /// 値ではない行。<c>value</c> を持たない（「適用」にも溜めにも乗らない）。
+    /// <c>dependsOn</c> は前提の設定の宛先 — 画面はそれに溜めてある変更があるかを見て、ボタンの代わりに「変更を適用すると使えます」を出す。
+    /// <c>state</c> は push（<c>configAction</c>）と同じ形の JSON 文字列（record を CefSharp へそのまま渡すと壊れる。<c>value</c> と同じ約束）。
+    /// 読むのは<b>本物の行</b>（下見の写しを描いているときも）。
+    /// </summary>
+    private object ActionRow(ConfigMember m, ILocalizer text) => new
+    {
+        key = m.Path,
+        name = m.NamePath,
+        label = m.LabelFor(text),
+        description = m.DescriptionFor(text),
+        kind = ConfigKind.Action,
+        group = GroupOf(m, text),
+        groupKey = GroupKeyOf(m),
+        depth = m.Section?.Depth + 1 ?? 0,
+
+        // 入れ物について出し入れする（ほかの項目と同じ）。
+        shown = Shown(m),
+        dependsOn = m.DependsOn,
+        state = actionSource().FirstOrDefault(a => a.Member.NamePath == m.NamePath) is { } real
+            ? UiBroadcast.Json(real.View(text))
+            : null,
+    };
 
     private static string? GroupOf(ConfigMember m, ILocalizer text) =>
         GroupKeyOf(m) is { } key ? text[key] : null;

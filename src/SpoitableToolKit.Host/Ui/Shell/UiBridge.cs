@@ -344,6 +344,18 @@ internal sealed class UiBridge(
         }
     }
 
+    /// <summary>
+    /// 設定画面の動きの行（<see cref="SpoitableSettingsAction"/>）のボタン。「適用」とは別で、押した瞬間に走る。
+    /// <b>待たない</b> — 走らせるのは裏で、行の姿（走っている間はボタンを押せない）は <c>configAction</c> の push で全部の面へ届く。
+    /// 走っている間の押し・結ばれていない行・無い行は何もしない（false）。
+    /// </summary>
+    public bool RunConfigAction(string token, string module, string key)
+    {
+        Authorize(token);
+
+        return configs.RunAction(module ?? string.Empty, key ?? string.Empty);
+    }
+
     /// <summary>通知への回答。どのサーフェスから答えても同じ口へ来る（先に答えた方が効く）。</summary>
     public void AnswerNotification(string token, long id, bool accepted)
     {
