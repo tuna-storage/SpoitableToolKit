@@ -106,9 +106,10 @@ internal sealed class HrsPanelStatus(
     {
         var src = source();
         var connected = src?.Connected;
+        var via = src?.Connection ?? HeartRateConnection.None;
         var at = now();
 
-        return [.. (src?.Sightings ?? []).Select(seen => HrsPanelMonitor.From(seen, connected, at))];
+        return [.. (src?.Sightings ?? []).Select(seen => HrsPanelMonitor.From(seen, connected, via, at))];
     }
 
     private HrsPanelSample[] Samples() => [.. log.Recent.Select(s => new HrsPanelSample(s.Bpm, s.At.ToString("O")))];

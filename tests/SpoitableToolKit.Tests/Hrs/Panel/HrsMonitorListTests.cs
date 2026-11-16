@@ -89,7 +89,7 @@ public sealed class HrsMonitorListTests
     }
 
     /// <summary>
-    /// GATT で繋ぐと広告を止める機種がある。繋がっている 1 台の最後の広告が古ければ、その時刻と電波の強さは出さずに「いま」とする
+    /// GATT で繋ぐと広告を止める機種がある。GATT で繋がっている 1 台の最後の広告が古ければ、その時刻と電波の強さは出さずに「いま」とする
     /// （残っているのは繋いだときの広告で、そのままだと「接続中・2 分前」になる）。繋がっていない 1 台は広告のまま。
     /// </summary>
     [Fact]
@@ -108,6 +108,27 @@ public sealed class HrsMonitorListTests
                 new Row("Polar", "A0:9E:1A:00:00:01", null, At.ToString("O"), true),
                 new Row("Polar H10 1234", "A0:9E:1A:00:00:02", -75, At.AddMinutes(-2).ToString("O"), false),
             ], rows);
+        }
+        finally
+        {
+            module.OnShutdown();
+        }
+    }
+
+    /// <summary>
+    /// 広告から心拍を読んでいる 1 台（GATT が張れずに広告へ落ちた Polar）は、広告しか届かない。広告が古いのは本当に黙ったということなので、
+    /// 「いま」にせず、ほかの行と同じく最後に見た時刻と電波の強さをそのまま出す（入口が手放すまで「接続中・たった今」と言い続けない）。
+    /// </summary>
+    [Fact]
+    public async Task AMonitorReadFromItsAdvertisementsKeepsItsRealAgeAndSignal()
+    {
+        var module = Start(new SeenSource(Belt, new MonitorSighting(Belt, -61, At.AddMinutes(-2))) { Via = HeartRateConnection.BleBroadcastPolar });
+        try
+        {
+            await WaitFor(() => Rows(Status(module)).Any(row => row.Connected));
+
+            Row[] rows = Rows(await module.HandleUiCallAsync("getMonitors", ""));
+            Assert.Equal([new Row("Polar", "A0:9E:1A:00:00:01", -61, At.AddMinutes(-2).ToString("O"), true)], rows);
         }
         finally
         {
@@ -168,7 +189,10 @@ public sealed class HrsMonitorListTests
 
         public MonitorIdentity? Connected { get; private set; }
 
-        public HeartRateConnection Connection => Connected is null ? HeartRateConnection.None : HeartRateConnection.BleGatt;
+        public HeartRateConnection Connection => Connected is null ? HeartRateConnection.None : Via;
+
+        /// <summary>繋がっているときの繋がり方。既定は GATT。</summary>
+        public HeartRateConnection Via { get; init; } = HeartRateConnection.BleGatt;
 
         public TimeSpan SilenceAfter => TimeSpan.FromSeconds(10);
 
