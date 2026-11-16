@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <!-- YYYY.M.BUILD -->
-    <Version>2026.11.0</Version>
+    <Version>2026.11.1</Version>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
