@@ -91,6 +91,8 @@ internal sealed class WinRtHeartRateSource(HrsConfig config, ILogger logger, Tim
 
     public IReadOnlyList<MonitorIdentity> Discovered => _discovery.All;
 
+    public IReadOnlyList<MonitorSighting> Sightings => _discovery.Seen;
+
     public MonitorIdentity? Connected { get; private set; }
 
     public HeartRateConnection Connection => Connected is null
@@ -272,12 +274,18 @@ internal sealed class WinRtHeartRateSource(HrsConfig config, ILogger logger, Tim
     private void OnAdvertisement(BluetoothLEAdvertisementWatcher sender, BluetoothLEAdvertisementReceivedEventArgs args)
     {
         // 広告から読む相手なら、まずそれを見る。**この広告は心拍サービスを名乗らない**ので、
-        // 下の絞りより前に置かないと 1 通も通らない。
-        if (_broadcasting == args.BluetoothAddress) ReadBroadcast(args);
+        // 下の絞りより前に置かないと 1 通も通らない。電波の強さと時刻もここで差し替える（下の See まで来ない）。
+        if (_broadcasting == args.BluetoothAddress)
+        {
+            ReadBroadcast(args);
+            _discovery.Touch(args.BluetoothAddress, args.RawSignalStrengthInDBm, _time.GetUtcNow());
+        }
 
         if (!args.Advertisement.ServiceUuids.Contains(HeartRateService)) return;
 
-        var (device, what) = _discovery.See(args.BluetoothAddress, args.Advertisement.LocalName);
+        // パネルへは push しない（能動スキャンでは 1 秒に何通も来る）。「心拍計」タブは開いている間、自分で読み直す。
+        var (device, what) = _discovery.See(
+            args.BluetoothAddress, args.Advertisement.LocalName, args.RawSignalStrengthInDBm, _time.GetUtcNow());
 
         switch (what)
         {

@@ -13,6 +13,12 @@ internal interface IHeartRateSource
     /// <summary>スキャンで見つかっているもの。設定の候補に出す。</summary>
     IReadOnlyList<MonitorIdentity> Discovered { get; }
 
+    /// <summary>
+    /// <see cref="Discovered"/> と同じ並びに、最後に広告を受けたときの様子（電波の強さ・時刻）を添えたもの。パネルの「心拍計」タブに出す。
+    /// 電波の強さと時刻が分からない入口は既定のまま（どちらも null）。
+    /// </summary>
+    IReadOnlyList<MonitorSighting> Sightings => [.. Discovered.Select(monitor => new MonitorSighting(monitor, null, null))];
+
     /// <summary>いま繋がっている先。繋がっていなければ <c>null</c>。パネルに出す。</summary>
     MonitorIdentity? Connected { get; }
 

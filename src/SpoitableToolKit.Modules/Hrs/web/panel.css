@@ -54,12 +54,19 @@ section { margin-top: 1.6em; }
 }
 .stats { padding: .4em .9em .6em; color: var(--faint); font-size: .78em; }
 
+/* 心拍計の一覧。1 行に 名前（とアドレス）｜接続中｜電波の強さ｜最後に見た時刻。右の 2 列は幅をそろえて行をまたいで並べる。狭い窓では名前の下へ折り返す。 */
 .devices { display: flex; flex-direction: column; gap: .4em; }
 .found {
-  display: flex; align-items: center; gap: .7em; padding: .5em .8em;
+  display: flex; flex-wrap: wrap; align-items: center; gap: .3em .9em; padding: .5em .8em;
   border: 1px solid var(--border); border-radius: .45em; background: var(--surface); font-size: .88em;
 }
 .found.here { border-color: var(--accent); }
+.found .who { flex: 1 1 12em; min-width: 0; display: flex; flex-direction: column; gap: .1em; }
+.found .name { overflow-wrap: anywhere; }
+.found .address { font: .85em var(--font-mono); color: var(--muted); }
+.found .signal, .found .seen {
+  flex: none; min-width: 5em; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
 .found .tag { flex: none; font-size: .8em; color: var(--accent); }
 
 .controls { display: flex; align-items: center; gap: .6em; margin: .6em 0 0; flex-wrap: wrap; }
@@ -89,8 +96,12 @@ select {
 .notice code { display: block; margin-top: .5em; font: .9em var(--font-mono); word-break: break-all; color: var(--muted); }
 .notice code:empty { display: none; }
 
-/* 「いま｜統計」のタブは本体の部品（`/_host/ui.css` の spoitable-tabs）。ここは置き場の余白だけ（上を空け、下は詰める）。 */
-.pane-tabs { margin: 1em 0 0 -.75em; }
+/* 「現在｜統計｜心拍計｜配信」のタブは本体の部品（`/_host/ui.css` の spoitable-tabs）。ここは置き場の余白だけ（上を空け、下は詰める）。
+ * 幅が足りなければ横にはみ出さずに折り返す（VR の窓は字が 1.5 倍）。 */
+.pane-tabs { margin: 1em 0 0 -.75em; flex-wrap: wrap; }
+
+/* タブの直下の欄は、上の余白をタイルと同じにそろえる（section の 1.6em だとタブから離れすぎる）。 */
+.pane > section:first-child { margin-top: 1em; }
 
 /* 統計 */
 .daynav { display: flex; align-items: center; gap: .4em; flex-wrap: wrap; margin-top: 1em; }

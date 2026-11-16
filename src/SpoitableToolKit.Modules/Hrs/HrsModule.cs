@@ -270,6 +270,9 @@ public sealed class HrsModule : ISpoitableModule, IConfigEventListener<HrsConfig
             // 形は push（status）の一部と同じ（タイルはどちらも同じ描き方で受ける）。
             "getHeartRate" => Task.FromResult(_panel.Tile()),
 
+            // 「心拍計」タブを開いている間、数秒おきに読み直す一覧。**記録は数えない**（getStatus は数える）。
+            "getMonitors" => Task.FromResult(_panel.Monitors()),
+
             "exportCsv" => _export.ExportCsv(payload),
 
             // 統計タブの 1 日ぶん。範囲は {"from":…,"to":…}（UTC のエポックミリ秒、両端を含む）。

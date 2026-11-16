@@ -8,13 +8,15 @@ public sealed class HrsLogTests
 {
     private const ulong Belt = 0xA09E1A123456;
 
+    private static readonly DateTimeOffset At = new(2026, 11, 16, 3, 0, 0, TimeSpan.Zero);
+
     [Fact]
     public void ADeviceIsNewOnlyTheFirstTime()
     {
         var discovery = new BleSightings();
 
-        Assert.Equal(Sighting.New, discovery.See(Belt, "Polar H10 1234").What);
-        Assert.Equal(Sighting.Known, discovery.See(Belt, "Polar H10 1234").What);
+        Assert.Equal(Sighting.New, discovery.See(Belt, "Polar H10 1234", -60, At).What);
+        Assert.Equal(Sighting.Known, discovery.See(Belt, "Polar H10 1234", -60, At).What);
         Assert.Single(discovery.All);
     }
 
@@ -27,8 +29,8 @@ public sealed class HrsLogTests
     {
         var discovery = new BleSightings();
 
-        discovery.See(Belt, "Polar H10 1234");
-        var (device, what) = discovery.See(Belt, null);
+        discovery.See(Belt, "Polar H10 1234", -60, At);
+        var (device, what) = discovery.See(Belt, null, -60, At);
 
         Assert.Equal(Sighting.Known, what);
         Assert.Equal("Polar H10 1234", device.Name);
@@ -40,19 +42,19 @@ public sealed class HrsLogTests
     {
         var discovery = new BleSightings();
 
-        var (first, firstWhat) = discovery.See(Belt, "  ");
+        var (first, firstWhat) = discovery.See(Belt, "  ", -60, At);
         Assert.Equal(Sighting.New, firstWhat);
         Assert.Equal("A0:9E:1A:12:34:56", first.Name);
 
-        Assert.Equal(Sighting.Named, discovery.See(Belt, "Polar H10 1234").What);
-        Assert.Equal(Sighting.Known, discovery.See(Belt, "Polar H10 1234").What);
+        Assert.Equal(Sighting.Named, discovery.See(Belt, "Polar H10 1234", -60, At).What);
+        Assert.Equal(Sighting.Known, discovery.See(Belt, "Polar H10 1234", -60, At).What);
     }
 
     [Fact]
     public void AConnectedDeviceCanNameItself()
     {
         var discovery = new BleSightings();
-        var (device, _) = discovery.See(Belt, null);
+        var (device, _) = discovery.See(Belt, null, -60, At);
 
         Assert.Equal(device, discovery.Rename(device, ""));
 
@@ -70,7 +72,7 @@ public sealed class HrsLogTests
     {
         var discovery = new BleSightings();
 
-        var (seen, _) = discovery.See(Belt, "Polar\n2026/11/10 ERR forged\u2028x\t");
+        var (seen, _) = discovery.See(Belt, "Polar\n2026/11/10 ERR forged\u2028x\t", -60, At);
         Assert.Equal("Polar?2026/11/10 ERR forged?x", seen.Name);
 
         var renamed = discovery.Rename(seen, "Belt\r\nINF fake" + new string('x', 300));
@@ -78,6 +80,65 @@ public sealed class HrsLogTests
         Assert.DoesNotContain('\r', renamed.Name);
         Assert.Equal(BleSightings.MaxName + 1, renamed.Name.Length);
         Assert.EndsWith("…", renamed.Name);
+    }
+
+    /// <summary>
+    /// 電波の強さと時刻は名前と逆で、最後の 1 通が正しい。名前の無い広告でも差し替える（名前は残す）。
+    /// ログに書くかどうか（<see cref="Sighting"/>）は名前だけで決まるので、差し替えても「変わった」とは言わない。
+    /// </summary>
+    [Fact]
+    public void TheSignalAndTimeFollowTheLastAdvertisementButTheNameStays()
+    {
+        var discovery = new BleSightings();
+
+        discovery.See(Belt, "Polar H10 1234", -70, At);
+        var (device, what) = discovery.See(Belt, null, -55, At.AddSeconds(5));
+
+        Assert.Equal(Sighting.Known, what);
+        Assert.Equal("Polar H10 1234", device.Name);
+        Assert.Equal(new MonitorSighting(new MonitorIdentity(Belt, "Polar H10 1234"), -55, At.AddSeconds(5)), Assert.Single(discovery.Seen));
+    }
+
+    /// <summary>繋いだ先の名乗りは広告ではないので、最後に見た電波の強さと時刻はそのまま。</summary>
+    [Fact]
+    public void RenamingKeepsTheSignalAndTheTime()
+    {
+        var discovery = new BleSightings();
+        var (device, _) = discovery.See(Belt, null, -66, At);
+
+        discovery.Rename(device, "Polar H10");
+
+        Assert.Equal(new MonitorSighting(new MonitorIdentity(Belt, "Polar H10"), -66, At), Assert.Single(discovery.Seen));
+    }
+
+    /// <summary>
+    /// 広告から心拍を読んでいる相手の製造元データは心拍サービスを名乗らない。知っている相手なら電波の強さと時刻を差し替えるが、
+    /// 知らない機器は一覧に足さない（一覧は心拍サービスを名乗るものだけ）。
+    /// </summary>
+    [Fact]
+    public void AnAdvertisementWithoutTheServiceRefreshesAKnownMonitorButListsNoStranger()
+    {
+        var discovery = new BleSightings();
+        discovery.See(Belt, "Polar Sense", -70, At);
+
+        discovery.Touch(Belt, -58, At.AddSeconds(3));
+        discovery.Touch(0x112233445566, -40, At.AddSeconds(3));
+
+        Assert.Equal(new MonitorSighting(new MonitorIdentity(Belt, "Polar Sense"), -58, At.AddSeconds(3)), Assert.Single(discovery.Seen));
+    }
+
+    /// <summary>見つけた順に並ぶ（数秒おきに読み直す一覧の行が、広告のたびに入れ替わらない）。辞書の並びとは違う順で足す。</summary>
+    [Fact]
+    public void TheListKeepsTheOrderTheMonitorsWereFound()
+    {
+        var discovery = new BleSightings();
+        ulong[] found = [3, 2, 1];
+
+        foreach (var address in found) discovery.See(address, null, -60, At);
+        discovery.See(found[0], "Named later", -50, At.AddSeconds(1));
+
+        Assert.Equal(found, discovery.All.Select(device => device.Address));
+        Assert.Equal(found, discovery.Seen.Select(seen => seen.Monitor.Address));
     }
 
     /// <summary>最初の 1 通は中身を書く（読めない機器を持ち込まれたときの手がかり）。</summary>

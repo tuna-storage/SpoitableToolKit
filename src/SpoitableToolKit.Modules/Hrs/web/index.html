@@ -23,13 +23,16 @@
 <div class="device" id="device"></div>
 <div class="empty" id="toggleHint"></div>
 
-<!-- 「いま｜統計」。本体のタブ（`/_host/ui.css`）。上下の余白だけこのページのもの（pane-tabs）。 -->
+<!-- 「現在｜統計｜心拍計｜配信」。本体のタブ（`/_host/ui.css`）。上下の余白だけこのページのもの（pane-tabs）。 -->
 <nav class="spoitable-tabs pane-tabs" role="tablist">
-  <button class="spoitable-tab spoitable-tab-on" id="tabNow" data-tab="now" role="tab" aria-selected="true" data-i18n="hrs.panel.tab.now"></button>
-  <button class="spoitable-tab" id="tabStats" data-tab="stats" role="tab" aria-selected="false" data-i18n="hrs.panel.tab.stats"></button>
+  <button class="spoitable-tab spoitable-tab-on" id="tabNow" data-tab="now" role="tab" aria-selected="true" aria-controls="paneNow" data-i18n="hrs.panel.tab.now"></button>
+  <button class="spoitable-tab" id="tabStats" data-tab="stats" role="tab" aria-selected="false" aria-controls="paneStats" data-i18n="hrs.panel.tab.stats"></button>
+  <button class="spoitable-tab" id="tabMonitors" data-tab="monitors" role="tab" aria-selected="false" aria-controls="paneMonitors" data-i18n="hrs.panel.tab.monitors"></button>
+  <button class="spoitable-tab" id="tabBroadcast" data-tab="broadcast" role="tab" aria-selected="false" aria-controls="paneBroadcast" data-i18n="hrs.panel.tab.broadcast"></button>
 </nav>
 
-<div class="pane" id="paneNow">
+<!-- 現在。数字とグラフ。ファイアウォールの知らせは何かおかしいときだけ出るので、いちばん上に置く。 -->
+<div class="pane" id="paneNow" role="tabpanel" aria-labelledby="tabNow">
   <div class="notice hidden" id="firewall">
     <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 10v4"/><path d="M12 17.5v.01"/></svg>
     <div class="body">
@@ -56,21 +59,10 @@
     <svg id="chart" viewBox="0 0 300 90" preserveAspectRatio="none"><path id="line" d=""></path></svg>
     <div class="stats"><span id="span"></span></div>
   </div>
-
-  <section>
-    <h2 data-i18n="hrs.panel.ws.title"></h2>
-    <div class="empty" id="wsState"></div>
-    <div class="urls hidden" id="urls"></div>
-  </section>
-
-  <section>
-    <h2 data-i18n="hrs.panel.devices.title"></h2>
-    <div class="devices" id="devices"></div>
-  </section>
 </div>
 
 <!-- 統計。**記録の欄もここ**（件数・書き出し）。 -->
-<div class="pane hidden" id="paneStats">
+<div class="pane hidden" id="paneStats" role="tabpanel" aria-labelledby="tabStats">
   <div class="daynav">
     <button class="step" id="dayPrev" data-i18n-title="hrs.panel.history.prev">‹</button>
     <!-- 日付だけの欄。ネイティブの暦は VR に出ないので `_host/when.js` が被せる。`required` = 「消す」を出さない。 -->
@@ -110,6 +102,26 @@
   </section>
 </div>
 
+<!-- 心拍計。見えている心拍計（心拍サービスを名乗る広告を出しているものだけ）。開いている間は数秒おきに読み直す（watchMonitors）。 -->
+<div class="pane hidden" id="paneMonitors" role="tabpanel" aria-labelledby="tabMonitors">
+  <section>
+    <h2 data-i18n="hrs.panel.devices.title"></h2>
+    <div class="devices" id="devices"></div>
+    <div class="hint" data-i18n="hrs.panel.devices.hint"></div>
+  </section>
+</div>
+
+<!-- 配信。待ち受けの様子と、OBS に貼る URL（待ち受けている間だけ）。 -->
+<div class="pane hidden" id="paneBroadcast" role="tabpanel" aria-labelledby="tabBroadcast">
+  <section>
+    <div class="empty" id="wsState"></div>
+  </section>
+  <section class="hidden" id="overlays">
+    <h2 data-i18n="hrs.panel.ws.overlays"></h2>
+    <div class="urls" id="urls"></div>
+  </section>
+</div>
+
 <!-- ネイティブの <select> と title・暦は VR の面に乗らない（別レイヤーで飛んでくる）ので、
      ページの中に描くものへ被せる。シェルと同じ 1 枚を引いている。 -->
 <script src="/_host/pick.js"></script>
@@ -135,6 +147,7 @@ const el = {
   firewallCommand: document.getElementById('firewallCommand'),
   addRule: document.getElementById('addRule'),
   wsState: document.getElementById('wsState'),
+  overlays: document.getElementById('overlays'),
   urls: document.getElementById('urls'),
   recordState: document.getElementById('recordState'),
   range: document.getElementById('range'),
@@ -143,6 +156,8 @@ const el = {
 
   paneNow: document.getElementById('paneNow'),
   paneStats: document.getElementById('paneStats'),
+  paneMonitors: document.getElementById('paneMonitors'),
+  paneBroadcast: document.getElementById('paneBroadcast'),
   day: document.getElementById('day'),
   dayPrev: document.getElementById('dayPrev'),
   dayNext: document.getElementById('dayNext'),
@@ -226,7 +241,7 @@ function render(status) {
   renderChart(status.samples ?? []);
   renderBroadcast(status);
   renderRecords(status);
-  renderDevices(status.discovered ?? [], status.device);
+  renderDevices(status.discovered ?? []);
 }
 
 /// 配信の様子。**始められたかどうかは始めてみるまで分からない**ので、
@@ -240,7 +255,7 @@ function renderBroadcast(status) {
       ? spoitable.t('hrs.panel.ws.listening', status.wsPort, status.wsClients | 0)
       : spoitable.t('hrs.panel.ws.failed', status.wsPort, status.wsError || '');
 
-  el.urls.classList.toggle('hidden', !listening);
+  el.overlays.classList.toggle('hidden', !listening);
   if (!listening) return;
 
   el.urls.replaceChildren(...(status.overlays ?? []).map(name => {
@@ -339,7 +354,9 @@ function renderChart(samples) {
   el.span.textContent = spoitable.t('hrs.panel.chart.recent', beats);
 }
 
-function renderDevices(found, connected) {
+/// 見えている心拍計（心拍サービスを名乗る広告を出しているものだけ）。1 行に名前・アドレス・「接続中」・電波の強さ・最後に見た時刻。
+/// 「接続中」は C# がアドレスで決めて渡す（名前の前方一致で見ると、「Polar」に繋がっているときに「Polar H10 …」にも付く）。
+function renderDevices(found) {
   if (!found.length) {
     const empty = document.createElement('div');
     empty.className = 'empty';
@@ -348,17 +365,32 @@ function renderDevices(found, connected) {
     return;
   }
 
-  el.devices.replaceChildren(...found.map(name => {
+  const now = Date.now();
+  el.devices.replaceChildren(...found.map(monitor => {
     const row = document.createElement('div');
     row.className = 'found';
-    row.dataset.device = name;
+    if (monitor.address) row.dataset.address = monitor.address;
 
-    const label = document.createElement('span');
-    label.textContent = name;
-    row.appendChild(label);
+    const who = document.createElement('div');
+    who.className = 'who';
+
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = monitor.name;
+    who.appendChild(name);
+
+    // 名前を名乗らない心拍計は名前がアドレスなので、2 回は出さない。
+    if (monitor.address && monitor.address !== monitor.name) {
+      const address = document.createElement('span');
+      address.className = 'address';
+      address.textContent = monitor.address;
+      who.appendChild(address);
+    }
+    row.appendChild(who);
 
     // 繋がっている先は分かるようにする。一覧だけだと、どれに繋がったのか分からない。
-    if (connected && name.startsWith(connected)) {
+    // 印は電波の強さより前に置く（右の 2 列が行をまたいでそろう）。
+    if (monitor.connected) {
       row.classList.add('here');
       const tag = document.createElement('span');
       tag.className = 'tag';
@@ -366,13 +398,65 @@ function renderDevices(found, connected) {
       row.appendChild(tag);
     }
 
+    if (Number.isInteger(monitor.signal)) {
+      const signal = document.createElement('span');
+      signal.className = 'signal';
+      signal.textContent = spoitable.t('hrs.panel.devices.signal', monitor.signal);
+      row.appendChild(signal);
+    }
+
+    const seen = ago(monitor.lastSeen, now);
+    if (seen) {
+      const at = document.createElement('span');
+      at.className = 'seen';
+      at.textContent = seen;
+      row.appendChild(at);
+    }
+
     return row;
   }));
 }
 
+/// 最後に見た時刻を「たった今」「2 分前」の形に。数えるのは手元の時計（C# と同じ PC の時計）。読めなければ空。
+function ago(iso, now = Date.now()) {
+  const at = Date.parse(iso ?? '');
+  if (isNaN(at)) return '';
+
+  const seconds = Math.max(0, Math.floor((now - at) / 1000));
+  if (seconds < 10) return spoitable.t('hrs.panel.devices.seen.now');
+  if (seconds < 60) return spoitable.t('hrs.panel.devices.seen.seconds', seconds);
+  if (seconds < 3600) return spoitable.t('hrs.panel.devices.seen.minutes', Math.floor(seconds / 60));
+  return spoitable.t('hrs.panel.devices.seen.hours', Math.floor(seconds / 3600));
+}
+
+// 心拍計タブを開いている間だけ、一覧を数秒おきに読み直す。広告は 1 秒に何通も来るので C# からは push しない —
+// 読み直さないと「〜前」と dBm が開いたときのまま止まり、あとから見つけた心拍計も出てこない。
+// 読むのは一覧だけの軽い口（getMonitors。記録は数えない — getStatus は数える）。
+const MONITORS_EVERY = 3000;
+let monitorsTimer = 0;
+
+function watchMonitors(on) {
+  clearInterval(monitorsTimer);
+  monitorsTimer = 0;
+  if (!on) return;
+
+  readMonitors();
+  monitorsTimer = setInterval(readMonitors, MONITORS_EVERY);
+}
+
+function readMonitors() {
+  spoitable.call('getMonitors')
+    .then(result => { if (activeTab === 'monitors') renderDevices(result?.discovered ?? []); })
+    .catch(err => console.error('心拍計の一覧を読めなかった', err));
+}
+
 let activeTab = 'now';
 
+// タブ → 中身。並びは HTML のタブの並び（現在｜統計｜心拍計｜配信）。
+const PANES = { now: el.paneNow, stats: el.paneStats, monitors: el.paneMonitors, broadcast: el.paneBroadcast };
+
 function selectTab(name) {
+  if (!Object.hasOwn(PANES, name)) return;
   activeTab = name;
 
   for (const tab of document.querySelectorAll('.spoitable-tabs .spoitable-tab')) {
@@ -381,12 +465,13 @@ function selectTab(name) {
     tab.setAttribute('aria-selected', String(on));
   }
 
-  el.paneNow.classList.toggle('hidden', name !== 'now');
-  el.paneStats.classList.toggle('hidden', name !== 'stats');
+  for (const [key, pane] of Object.entries(PANES)) pane.classList.toggle('hidden', key !== name);
 
   // 開くたびに読み直す（同じ日なら見ている範囲はそのまま）。**今日の線は開いている間は伸びない** —
   // 伸ばすには「今日」を押すか、タブを開き直す。
   if (name === 'stats') loadDay({ keepView: true });
+
+  watchMonitors(name === 'monitors');
 }
 
 for (const tab of document.querySelectorAll('.spoitable-tabs .spoitable-tab')) tab.addEventListener('click', () => selectTab(tab.dataset.tab));
@@ -933,6 +1018,12 @@ window.__stats = {
   get state() {
     return { day: daily.day, view: daily.view, count: daily.points.length, colors: daily.colors, tab: activeTab };
   },
+};
+
+// 試験から見る口。「〜前」の区切りと、心拍計の一覧を読み直しているか。
+window.__monitors = {
+  ago,
+  get watching() { return monitorsTimer !== 0; },
 };
 
 el.toggle.addEventListener('click', () => {

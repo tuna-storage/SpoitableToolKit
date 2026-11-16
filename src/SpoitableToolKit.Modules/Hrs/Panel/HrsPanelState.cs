@@ -36,7 +36,8 @@ internal sealed record HrsPanelState
 
     public required string FirewallCommand { get; init; }
 
-    public required string[] Discovered { get; init; }
+    /// <summary>見えている心拍計（「心拍計」タブ）。心拍サービスを名乗る広告を出しているものだけ。</summary>
+    public required HrsPanelMonitor[] Discovered { get; init; }
 
     public required HrsPanelSample[] Samples { get; init; }
 

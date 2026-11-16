@@ -97,6 +97,10 @@ internal sealed class HeartRateManager : IHeartRateDeviceSink, IDisposable
     public IReadOnlyList<MonitorIdentity> Discovered =>
         [.. Volatile.Read(ref _devices).OfType<SourceAsDevice>().SelectMany(device => device.Discovered)];
 
+    /// <summary>パネルの「心拍計」タブの一覧（<see cref="Discovered"/> に、最後に見た様子を添えたもの）。</summary>
+    public IReadOnlyList<MonitorSighting> Sightings =>
+        [.. Volatile.Read(ref _devices).OfType<SourceAsDevice>().SelectMany(device => device.Sightings)];
+
     public MonitorIdentity? Connected => Active is { } active && active.Connection != HeartRateConnection.None ? active.Identity : null;
 
     public HeartRateConnection Connection => Active?.Connection ?? HeartRateConnection.None;

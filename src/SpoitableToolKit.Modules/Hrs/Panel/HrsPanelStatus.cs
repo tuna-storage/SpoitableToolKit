@@ -49,6 +49,12 @@ internal sealed class HrsPanelStatus(
     /// <summary>手首のタイルの分（<c>getHeartRate</c>）。<b>記録は数えない</b> — タイルはページを送るたびに開き直すので、DB を数えるには多すぎる。</summary>
     public string Tile() => JsonSerializer.Serialize(TileState(), HrsPanelJson.Options);
 
+    /// <summary>
+    /// 「心拍計」タブの一覧だけ（<c>getMonitors</c>）。タブを開いている間、パネルが数秒おきに読み直す — 広告は 1 秒に何通も来るので push しない。
+    /// <b>記録は数えない</b>（数秒おきに DB を数えるには重い）。
+    /// </summary>
+    public string Monitors() => JsonSerializer.Serialize(new HrsPanelMonitors(MonitorRows()), HrsPanelJson.Options);
+
     private HrsPanelState Build()
     {
         var src = source();
@@ -71,7 +77,7 @@ internal sealed class HrsPanelStatus(
             HdsPort = config.Hds.Port,
             Firewall = firewall.State.ToString().ToLowerInvariant(),
             FirewallCommand = HdsFirewall.CommandFor(config.Hds.Port),
-            Discovered = [.. (src?.Discovered ?? []).Select(m => m.ToSuggestion())],
+            Discovered = MonitorRows(),
             Samples = Samples(),
             Stats = log.Overall is { Max: > 0 } overall ? new HrsPanelStats(overall.Min, overall.Avg, overall.Max) : null,
 
@@ -94,6 +100,14 @@ internal sealed class HrsPanelStatus(
         Connected: source()?.Connected is not null,
         HeartRate: session()?.HeartRate ?? 0,
         Samples: Samples());
+
+    private HrsPanelMonitor[] MonitorRows()
+    {
+        var src = source();
+        var connected = src?.Connected;
+
+        return [.. (src?.Sightings ?? []).Select(seen => HrsPanelMonitor.From(seen, connected))];
+    }
 
     private HrsPanelSample[] Samples() => [.. log.Recent.Select(s => new HrsPanelSample(s.Bpm, s.At.ToString("O")))];
 }

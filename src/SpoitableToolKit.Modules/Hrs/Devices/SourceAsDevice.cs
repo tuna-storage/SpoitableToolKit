@@ -31,6 +31,9 @@ internal sealed class SourceAsDevice : IHeartRateDevice, IHeartRateDeviceDiscove
     /// <summary>入口がスキャンで見つけているもの（設定の候補）。</summary>
     public IReadOnlyList<MonitorIdentity> Discovered => _source.Discovered;
 
+    /// <summary>入口が見つけているものと、最後に見た様子（パネルの「心拍計」タブ）。</summary>
+    public IReadOnlyList<MonitorSighting> Sightings => _source.Sightings;
+
     public MonitorIdentity Identity
     {
         get

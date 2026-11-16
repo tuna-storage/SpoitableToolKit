@@ -7,15 +7,34 @@ namespace SpoitableToolKit.Modules.Hrs.Devices.Ble;
 /// スキャンで見つかった心拍計。<b>一度分かった名前は手放さない</b> —
 /// 能動スキャンでは名前の無い広告と名前のある応答が交互に来るので、最後の 1 通で上書きすると
 /// 名前がアドレスへ戻ってしまう。
+/// <para>
+/// 電波の強さと最後に見た時刻は名前と逆で、<b>最後の 1 通が正しい</b>（広告のたびに差し替える）。
+/// 並びは見つけた順（辞書の並びは決まっていない）。
+/// </para>
 /// </summary>
 internal sealed class BleSightings
 {
-    private readonly ConcurrentDictionary<ulong, MonitorIdentity> _devices = [];
+    private readonly ConcurrentDictionary<ulong, Entry> _devices = [];
     private readonly Lock _gate = new();
 
-    public IReadOnlyList<MonitorIdentity> All => [.. _devices.Values];
+    /// <summary>次に見つけた心拍計に振る番号（見つけた順に並べるため）。書くのは <see cref="_gate"/> の中。</summary>
+    private long _found;
 
-    public (MonitorIdentity Device, Sighting What) See(ulong address, string? localName)
+    /// <param name="Order">見つけた順の番号。</param>
+    private readonly record struct Entry(MonitorSighting Seen, long Order);
+
+    public IReadOnlyList<MonitorIdentity> All => [.. Ordered().Select(entry => entry.Seen.Monitor)];
+
+    /// <summary>見つけた心拍計と、最後に広告を受けたときの様子（<see cref="All"/> と同じ並び）。</summary>
+    public IReadOnlyList<MonitorSighting> Seen => [.. Ordered().Select(entry => entry.Seen)];
+
+    private IEnumerable<Entry> Ordered() => _devices.Values.OrderBy(entry => entry.Order);
+
+    /// <summary>
+    /// 心拍サービスを名乗る広告を 1 通受けた。返す <see cref="Sighting"/> は<b>名前の変わり目だけ</b>を見る（ログに書くかどうか）—
+    /// 電波の強さと時刻は毎回変わるので、そこで「変わった」とは言わない。
+    /// </summary>
+    public (MonitorIdentity Device, Sighting What) See(ulong address, string? localName, int signalDbm, DateTimeOffset at)
     {
         var named = !string.IsNullOrWhiteSpace(localName);
         var seen = new MonitorIdentity(address, named ? Clean(localName!) : MonitorIdentity.FormatAddress(address));
@@ -24,27 +43,47 @@ internal sealed class BleSightings
         {
             if (!_devices.TryGetValue(address, out var known))
             {
-                _devices[address] = seen;
+                _devices[address] = new Entry(new MonitorSighting(seen, signalDbm, at), _found++);
                 return (seen, Sighting.New);
             }
 
-            if (!named || known.Name == seen.Name) return (known, Sighting.Known);
+            var keep = !named || known.Seen.Monitor.Name == seen.Name;
+            var monitor = keep ? known.Seen.Monitor : seen;
 
-            _devices[address] = seen;
-            return (seen, Sighting.Named);
+            _devices[address] = known with { Seen = new MonitorSighting(monitor, signalDbm, at) };
+            return (monitor, keep ? Sighting.Known : Sighting.Named);
+        }
+    }
+
+    /// <summary>
+    /// 心拍サービスを名乗らない広告を受けた（広告から心拍を読んでいる相手の製造元データ）。<b>知っている相手だけ</b>電波の強さと時刻を差し替える —
+    /// 一覧に足すのは心拍サービスを名乗る機器だけ（近くの BLE 機器を全部並べない）。
+    /// </summary>
+    public void Touch(ulong address, int signalDbm, DateTimeOffset at)
+    {
+        lock (_gate)
+        {
+            if (_devices.TryGetValue(address, out var known))
+                _devices[address] = known with { Seen = known.Seen with { SignalDbm = signalDbm, LastSeen = at } };
         }
     }
 
     /// <summary>
     /// 繋いだ先が名乗った名前（<c>BluetoothLEDevice.Name</c>）。広告に名前が無い機器でも、
-    /// 繋げば分かることが多い。空なら何もしない。
+    /// 繋げば分かることが多い。空なら何もしない。電波の強さ・時刻・並びはそのまま（名乗りは広告ではない）。
     /// </summary>
     public MonitorIdentity Rename(MonitorIdentity device, string? name)
     {
         if (string.IsNullOrWhiteSpace(name) || device.Name == Clean(name)) return device;
 
         var renamed = device with { Name = Clean(name) };
-        lock (_gate) _devices[device.Address] = renamed;
+        lock (_gate)
+        {
+            _devices[device.Address] = _devices.TryGetValue(device.Address, out var known)
+                ? known with { Seen = known.Seen with { Monitor = renamed } }
+                : new Entry(new MonitorSighting(renamed, null, null), _found++);
+        }
+
         return renamed;
     }
 
