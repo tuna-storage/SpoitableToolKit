@@ -184,7 +184,7 @@ internal sealed class VrLoop : IDisposable, IVrControls
             features);
 
         // UI スレッドで回す。打つのは VrPacer のスレッドだが、周の中身はこの UI スレッドへ投げて走らせる
-        // （窓が先に出来ているので、ここには WinForms の SynchronizationContext が入っている）。
+        // （デスクトップの側（DesktopApp）が先に出来ていて、ここには WinForms の SynchronizationContext が入っている。窓をトレイにしまって始めても同じ）。
         var ui = SynchronizationContext.Current as WindowsFormsSynchronizationContext ?? new WindowsFormsSynchronizationContext();
 
         var probe = new VrLoopProbe(_logger, repeat: Environment.GetEnvironmentVariable("SPOITABLE_VR_PROBE") is "1");

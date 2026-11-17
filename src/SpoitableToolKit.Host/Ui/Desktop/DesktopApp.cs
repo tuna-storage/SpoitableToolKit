@@ -196,14 +196,22 @@ internal sealed class DesktopApp : ApplicationContext, IHostWindow
         _exitWhenClosed = step == CloseStep.Exit;
     }
 
+    /// <summary>
+    /// 閉じ終わった。終了するなら、閉じる知らせの処理が済んでから（次の周で）窓を破棄して終える。
+    /// ログオフ（<c>WM_ENDSESSION</c>）の閉じ方では、破棄されないまま知らせだけが来ることがある。破棄しないまま CEF を畳むと、窓の browser が生きたまま止まる。
+    /// </summary>
     private void OnWindowClosed(object? sender, FormClosedEventArgs e)
     {
-        if (!ReferenceEquals(sender, _window)) return;
+        if (sender is not DesktopWindow window || !ReferenceEquals(window, _window)) return;
         _window = null;
 
         if (_exitWhenClosed)
         {
-            ExitNow();
+            Post(() =>
+            {
+                window.Dispose();
+                ExitNow();
+            });
             return;
         }
 
@@ -214,6 +222,7 @@ internal sealed class DesktopApp : ApplicationContext, IHostWindow
     /// 閉じる知らせを通らずに窓が壊された。画面の外に置いた窓（タスクバーに出さない）は WinForms が作った見えない持ち主の窓にぶら下がっていて、
     /// 持ち主が <c>WM_CLOSE</c> で壊されると、窓も閉じる知らせ無しに一緒に壊れる。外から「終わって」と言われたのと同じなので、終了する
     /// （残すと、壊れた窓を持ったまま動き続ける）。閉じ終わったあと・作り直している最中は、ここへ来ても何もしない。
+    /// 窓の破棄と終了は、壊している最中を抜けてから（次の周で）する。窓は Form としては破棄されていないので、こちらで破棄する（browser も一緒に）。
     /// </summary>
     private void OnWindowDestroyed(object? sender, EventArgs e)
     {
@@ -221,7 +230,11 @@ internal sealed class DesktopApp : ApplicationContext, IHostWindow
 
         _window = null;
         _logger.LogInformation("The window was destroyed without being closed (its owner window was closed); exiting");
-        ExitNow();
+        Post(() =>
+        {
+            window.Dispose();
+            ExitNow();
+        });
     }
 
     /// <summary>
@@ -281,21 +294,36 @@ internal sealed class DesktopApp : ApplicationContext, IHostWindow
         }
     }
 
+    /// <summary>窓を閉じられなくても（例外）、<c>Application.Run</c> は必ず返す（返らないと、終了の印だけ立って何も終わらない）。</summary>
     private void ExitNow()
     {
         if (_exiting) return;
         _exiting = true;
         _logger.LogInformation("Exiting the app");
 
-        _showWait.Unregister(null);
-        if (_window is { } window) CloseOurselves(window);
-        _credits.Close();
-
-        // 先にトレイから消す。このあとの片付け（Program の finally）は数秒かかる。
-        _tray?.Dispose();
-        _messages.Dispose();
-
-        ExitThread();
+        try
+        {
+            _showWait.Unregister(null);
+            if (_window is { } window) CloseOurselves(window);
+            _credits.Close();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not close every window before exiting");
+        }
+        finally
+        {
+            try
+            {
+                // 先にトレイから消す。このあとの片付け（Program の finally）は数秒かかる。
+                _tray?.Dispose();
+                _messages.Dispose();
+            }
+            finally
+            {
+                ExitThread();
+            }
+        }
     }
 
     /// <summary>UI のスレッドへ渡す。抜けたあと（終了の後）に来たものは捨てる。</summary>
