@@ -18,17 +18,15 @@ internal static class StartupRegistration
         return string.Equals(registered, command, StringComparison.OrdinalIgnoreCase) ? StartupChange.None : StartupChange.Write;
     }
 
-    /// <summary>切ったことを表す先頭の 1 バイト。</summary>
-    private const byte DisabledMark = 0x03;
-
     /// <summary>
-    /// Windows の「スタートアップ アプリ」の印（REG_BINARY、12 バイト）を読む。先頭の 1 バイトが 03 なら、利用者が Windows の側で切った（続く 8 バイトは切った時刻の FILETIME）。
-    /// ほかの値（02・01 で、時刻は 0）は入として扱う。印が無ければ <see cref="StartupApproval.Missing"/>（Windows も入として扱う）。
+    /// Windows の「スタートアップ アプリ」の印（REG_BINARY、ふつうは 12 バイト）を読む。先頭のバイトが奇数なら切、偶数なら入。
+    /// 長さは見ない（12 バイトに足りなくても、先頭のバイトがあればそれで決める）。値はあるのに空なら入として扱う（切のときは、ほかの印と同じく片付ける）。
+    /// 値が無ければ <see cref="StartupApproval.Missing"/>（Windows も入として扱う）。
     /// </summary>
     public static StartupApproval ApprovalOf(byte[]? mark) => mark switch
     {
         null => StartupApproval.Missing,
-        [DisabledMark, ..] => StartupApproval.Disabled,
+        [var first, ..] when (first & 1) == 1 => StartupApproval.Disabled,
         _ => StartupApproval.Enabled,
     };
 

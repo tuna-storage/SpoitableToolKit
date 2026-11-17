@@ -41,13 +41,17 @@ public sealed class StartupRegistrationTests
     }
 
     /// <summary>
-    /// Windows の「スタートアップ アプリ」の印（12 バイト）。切ったものは先頭が 03 で、続く 8 バイトが切った時刻。入のものは 02 か 01 で、時刻は 0。
+    /// Windows の「スタートアップ アプリ」の印（ふつうは 12 バイト）。先頭のバイトが奇数なら切、偶数なら入。長さは見ない。値はあるのに空なら入、値が無ければ印なし。
     /// </summary>
     [Theory]
     [InlineData("03 00 00 00 00 40 2B 6A 12 34 DB 01", "Disabled")]
     [InlineData("03 00 00 00 00 00 00 00 00 00 00 00", "Disabled")]
+    [InlineData("01 00 00 00 00 00 00 00 00 00 00 00", "Disabled")]
+    [InlineData("07 00 00 00 00 40 2B 6A 12 34 DB 01", "Disabled")]
     [InlineData("02 00 00 00 00 00 00 00 00 00 00 00", "Enabled")]
-    [InlineData("01 00 00 00 00 00 00 00 00 00 00 00", "Enabled")]
+    [InlineData("06 00 00 00 00 00 00 00 00 00 00 00", "Enabled")]
+    [InlineData("03", "Disabled")]
+    [InlineData("02", "Enabled")]
     [InlineData("", "Enabled")]
     [InlineData(null, "Missing")]
     public void TheWindowsMarkIsReadFromItsFirstByte(string? hex, string expected)
