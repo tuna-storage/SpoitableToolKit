@@ -1,6 +1,6 @@
 namespace SpoitableToolKit.Host.Ui.Tray;
 
-/// <summary>トレイのメニューの 1 行。WinForms を知らない形で組み立てて（<see cref="TrayMenu"/>）、<see cref="TrayIcon"/> が開くたびに写す。</summary>
+/// <summary>トレイのメニューの 1 行。Windows のメニューを知らない形で組み立てて（<see cref="TrayMenu"/>）、開くたびに <see cref="TrayPopupMenu"/> が Windows 標準のメニューへ写す。</summary>
 internal sealed record TrayMenuItem
 {
     /// <summary>押されたときに返す名前（<see cref="TrayMenu"/> の定数）。区切りとサブメニューの親は押しても何もしない。</summary>

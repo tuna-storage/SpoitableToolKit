@@ -69,16 +69,42 @@ internal sealed class DesktopApp : ApplicationContext, IHostWindow
 
         _messages = new AppMessageWindow(Exit);
 
+        // メニューは Windows 標準のもの。アプリ モードが暗ければ暗く出す（窓を作る前に 1 回だけ）。
+        // トレイを出さない起動（e2e）でも同じに呼ぶ — 窓の見た目が変わらないことを、ふだんと同じ形で確かめられるように。
+        DarkMenus.Allow(logger);
+
         if (_offscreen)
+        {
             logger.LogInformation("SPOITABLE_UI_OFFSCREEN is set; no tray icon (a second start with the same data folder opens the window)");
+        }
         else
-            _tray = new TrayIcon(() => TrayMenu.Build(text, VrFeatures.Of(config)), Pressed, Open);
+        {
+            _tray = new TrayIcon(() => TrayMenu.Build(text, VrFeatures.Of(config)), Pressed, Open, () => _messages.Handle);
+            ShowTheMenuForAPicture(logger);
+        }
 
         _showWait = ThreadPool.RegisterWaitForSingleObject(showRequests, (_, _) => Post(ShowRequested), null, Timeout.Infinite, executeOnlyOnce: false);
 
         if (startInTray) logger.LogInformation("Starting in the tray; the window opens from the tray icon");
         else Open();
     }
+
+    /// <summary>
+    /// 見た目を撮るための口（<see cref="MenuShotVariable"/><c>=x,y</c>）。起動してすぐに、トレイのメニューをその画面の座標に 1 回出す。
+    /// e2e はトレイを出さず、トレイのアイコンを外から押す道も無いので、メニューの見た目はこれで出して撮る。無ければ何もしない。
+    /// </summary>
+    private void ShowTheMenuForAPicture(ILogger logger)
+    {
+        if (Environment.GetEnvironmentVariable(MenuShotVariable) is not { Length: > 0 } at
+            || at.Split(',') is not [var x, var y]
+            || !int.TryParse(x, out var left) || !int.TryParse(y, out var top))
+            return;
+
+        logger.LogInformation("{Variable} is set; showing the tray menu at {X},{Y}", MenuShotVariable, left, top);
+        Post(() => _tray?.ShowMenu(new Point(left, top)));
+    }
+
+    public const string MenuShotVariable = "SPOITABLE_TRAY_MENU_AT";
 
     /// <summary>窓を開かずに始めるか。Windows の起動時の起動（<see cref="WindowsStartup.TrayArgument"/>）は、設定に関係なくしまった状態で始まる。</summary>
     public static bool StartsInTray(IReadOnlyList<string> args, HostConfig config) =>
