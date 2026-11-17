@@ -117,6 +117,12 @@ internal static class Program
         themes.Ensure();
         hostConfig.ThemeNames = themes.Names;
 
+        // 本体の設定（config.json）を読む。**画面の文言より先** — 言語の設定を読む前に辞書を読むと OS の言語で読んでしまい、
+        // モジュールの読み込みの間に引く文言（読み込めなかったモジュールの帯・モジュールが OnInit で引く字）までその言語になる。
+        var configs = new ModuleConfigStore(hostEvents.Hubs, loggerFactory);
+        var hostConfigEvents = configs.Add(HostConfig.Id, "Host", "⚙", hostConfig, AppPaths.DataDirectory,
+            displayNameKey: "host.settings.title");
+
         // 画面の文言。**モジュールの辞書は読み込んだ後で合成し直す**（置き場所が分かるのがその後）。
         var text = new Localizer(loggerFactory.CreateLogger<Localizer>());
         text.Load(hostConfig.Language.ToString(), [LocaleSource.Host]);
@@ -183,13 +189,8 @@ internal static class Program
             .AddSingleton(typeof(ILogger<>), typeof(Logger<>))
             .BuildServiceProvider();
 
-        var configs = new ModuleConfigStore(hostEvents.Hubs, loggerFactory);
-
         // 設定画面の動きの行（SpoitableSettingsAction）が変わったら、その 1 行だけを全部の面へ流す。モジュールが結ぶ（OnInit）より先に挿す。
         configs.ActionSink = new ConfigActionPusher(broadcast, configs, text);
-
-        var hostConfigEvents = configs.Add(HostConfig.Id, "Host", "⚙", hostConfig, AppPaths.DataDirectory,
-            displayNameKey: "host.settings.title");
 
         // 前の起動までのアプリログで台帳を埋める。残す期間は設定を読んでからでないと分からないので、受け口を作った時ではなくここで。
         // 読み戻してから消す。消すのはキューの先で、読み戻しと競う。先に消すと負けたときだけ古い行が台帳に紛れる。
