@@ -57,11 +57,23 @@ internal class UiBroadcast
     private static string Script(string channel, object payload) =>
         $"window.stk && window.stk.receive({JsonSerializer.Serialize(channel)}, {Json(payload)});";
 
+    /// <summary>
+    /// ページがまだ JS を受け取れない間は黙って捨てる。UI 側は接続時に getStatus() で現在値を取り直すので、取りこぼしても追いつける。
+    /// 受け取れるのを見てから送るまでの間に、別のスレッドがその面を畳むことがある（窓をトレイにしまう・VR の面を片付ける）。
+    /// そのとき投げたもの（破棄済み・中の browser がもう無い）は、その面だけ飛ばして残りの面へ送る。投げると後ろの面に届かず、push を出した側
+    /// （設定の「適用」など）まで失敗したことになる。畳んでいない面が投げたものは、今までどおり上げる。
+    /// </summary>
     private static void Run(IWebBrowser target, string script)
     {
-        // ページがまだ JS を受け取れない間は黙って捨てる。
-        // UI 側は接続時に getStatus() で現在値を取り直すので、取りこぼしても追いつける。
-        if (target.CanExecuteJavascriptInMainFrame)
+        if (!target.CanExecuteJavascriptInMainFrame) return;
+
+        try
+        {
             target.ExecuteScriptAsync(script);
+        }
+        catch (Exception) when (target.IsDisposed)
+        {
+            // 畳んだ面。画面ごと無くなったので、送る先も無い。
+        }
     }
 }
