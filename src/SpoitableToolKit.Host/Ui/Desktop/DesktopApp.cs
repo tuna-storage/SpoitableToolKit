@@ -79,7 +79,7 @@ internal sealed class DesktopApp : ApplicationContext, IHostWindow
         }
         else
         {
-            _tray = new TrayIcon(() => TrayMenu.Build(text, VrFeatures.Of(config)), Pressed, Open, () => _messages.Handle);
+            _tray = new TrayIcon(() => TrayMenu.Build(text, VrFeatures.Of(config)), Pressed, Toggle, () => _messages.Handle);
             ShowTheMenuForAPicture(logger);
         }
 
@@ -161,7 +161,28 @@ internal sealed class DesktopApp : ApplicationContext, IHostWindow
         }
     }
 
-    /// <summary>窓を開く。無ければ作り、あれば前に出す。</summary>
+    /// <summary>
+    /// トレイのアイコンの左クリック。窓が出ていればしまい、そうでなければ開く（<see cref="TrayToggle"/>）。
+    /// しまうのは × で「トレイにしまう」を選んだときと同じ道。ただし聞かないし、閉じるボタンの動きの設定も読まない・書かない（アイコンを押すこと自体が、しまうの意思表示）。
+    /// 右クリックのメニューの「開く」と、2 つ目の起動の「前に出て」は、開くだけ。
+    /// </summary>
+    private void Toggle()
+    {
+        var window = _window;
+        var click = TrayToggle.For(window is not null, window?.Visible == true, window?.WindowState == FormWindowState.Minimized);
+
+        if (click == TrayClick.PutAway)
+        {
+            _logger.LogInformation("The tray icon was clicked while the window was on screen; putting it in the tray");
+            Collapse();
+        }
+        else
+        {
+            Open();
+        }
+    }
+
+    /// <summary>窓を開く。無ければ作り、あれば前に出す（最小化していれば元の大きさに戻す）。</summary>
     private void Open()
     {
         if (_exiting) return;

@@ -3,7 +3,7 @@ using SpoitableToolKit.Host.Ui.Desktop;
 namespace SpoitableToolKit.Host.Ui.Tray;
 
 /// <summary>
-/// タスクトレイのアイコン。左クリックで開く、右クリックで Windows 標準のメニュー（<see cref="TrayPopupMenu"/>。開くたびに組み立て直す）。
+/// タスクトレイのアイコン。左クリックで窓を開く・しまう（決めるのは呼んだ側）、右クリックで Windows 標準のメニュー（<see cref="TrayPopupMenu"/>。開くたびに組み立て直す）。
 /// UI のスレッドで作って片付ける。押されたときの動きも UI のスレッドから呼ぶ。
 /// Explorer が落ちて立ち直ったときに出し直すのは NotifyIcon 自身（タスクバーができ直した知らせを受けている）。
 /// </summary>
@@ -21,9 +21,9 @@ internal sealed class TrayIcon : IDisposable
 
     /// <param name="build">メニューの中身。開くたびに呼ぶ。</param>
     /// <param name="pressed">押された項目の名前（<see cref="TrayMenuItem.Id"/>）。</param>
-    /// <param name="open">左クリック。</param>
+    /// <param name="leftClick">左クリック（ボタンを離したとき）。ダブルクリックでも 1 回だけ来る — NotifyIcon は、ダブルクリックの 2 回目の離しではクリックを上げない。</param>
     /// <param name="owner">メニューの持ち主の窓（アプリの見えない窓）。出すたびに引く。</param>
-    public TrayIcon(Func<IReadOnlyList<TrayMenuItem>> build, Action<string> pressed, Action open, Func<IntPtr> owner)
+    public TrayIcon(Func<IReadOnlyList<TrayMenuItem>> build, Action<string> pressed, Action leftClick, Func<IntPtr> owner)
     {
         _build = build;
         _pressed = pressed;
@@ -35,7 +35,7 @@ internal sealed class TrayIcon : IDisposable
         _icon = new NotifyIcon { Icon = _small, Text = Tooltip };
         _icon.MouseClick += (_, e) =>
         {
-            if (e.Button == MouseButtons.Left) open();
+            if (e.Button == MouseButtons.Left) leftClick();
             else if (e.Button == MouseButtons.Right) ShowMenu(Cursor.Position);
         };
         _icon.Visible = true;
