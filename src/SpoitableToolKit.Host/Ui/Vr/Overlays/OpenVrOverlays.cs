@@ -70,6 +70,9 @@ internal sealed class OpenVrOverlays(ILogger logger) : IVrOverlays
     public void Stop()
     {
         _input = null;
+
+        // 繋ぎを返せば SteamVR が板もサムネイルも消す。次に繋いだときの handle とは別物。
+        _thumbnails.Clear();
         OpenVR.Shutdown();
     }
 
@@ -265,8 +268,10 @@ internal sealed class OpenVrOverlays(ILogger logger) : IVrOverlays
         ulong main = 0;
         ulong thumbnail = 0;
 
-        // 2 つ返る。板の方だけ使う（サムネイルはタブのアイコンで、今は既定のまま）。
-        if (OpenVR.Overlay.CreateDashboardOverlay(key, name, ref main, ref thumbnail) != EVROverlayError.None) return 0;
+        // 2 つ返る。板の方だけ使う（サムネイルはタブのアイコンで、今は既定のまま）。サムネイルは板を消すときに一緒に消す（Destroy）。
+        if (Refused(OpenVR.Overlay.CreateDashboardOverlay(key, name, ref main, ref thumbnail), key)) return 0;
+
+        if (thumbnail != 0) _thumbnails[main] = thumbnail;
 
         OpenVR.Overlay.SetOverlayWidthInMeters(main, widthInMeters);
 
@@ -281,6 +286,21 @@ internal sealed class OpenVrOverlays(ILogger logger) : IVrOverlays
         // ダッシュボードの外の板（手首）は逆で、呼ばないと出ない（SetShown）。
 
         return main;
+    }
+
+    /// <summary>
+    /// ダッシュボードの板ごとのサムネイル。繋ぎを返せば SteamVR が全部消すが、繋いだまま板だけ消して作り直すこと（設定でダッシュボードを切って入れ直す）があるので、板と一緒に消す。
+    /// 残すと、作り直すときに同じ key が使われていると断られうる。
+    /// </summary>
+    private readonly Dictionary<ulong, ulong> _thumbnails = [];
+
+    /// <summary>板を作るのを断られたら、その理由を残す（呼ぶ側の「作れなかった」には理由が無い）。同じ key で作り直したときの <c>KeyInUse</c> と、SteamVR がまだ受けられないのとを、あとから見分けるため。</summary>
+    private bool Refused(EVROverlayError result, string key)
+    {
+        if (result == EVROverlayError.None) return false;
+
+        logger.LogWarning("SteamVR refused to create the overlay {Key} ({Result})", key, result);
+        return true;
     }
 
     public void UploadTexture(ulong handle, nint texture)
@@ -428,13 +448,19 @@ internal sealed class OpenVrOverlays(ILogger logger) : IVrOverlays
         },
     };
 
-    public void Destroy(ulong handle) => OpenVR.Overlay.DestroyOverlay(handle);
+    public void Destroy(ulong handle)
+    {
+        OpenVR.Overlay.DestroyOverlay(handle);
+
+        // ダッシュボードの板ならサムネイルも消す（板と一緒にもう消えていれば、断られるだけ）。
+        if (_thumbnails.Remove(handle, out var thumbnail)) OpenVR.Overlay.DestroyOverlay(thumbnail);
+    }
 
     public ulong CreateOverlay(string key, string name, float widthInMeters)
     {
         ulong handle = 0;
 
-        if (OpenVR.Overlay.CreateOverlay(key, name, ref handle) != EVROverlayError.None) return 0;
+        if (Refused(OpenVR.Overlay.CreateOverlay(key, name, ref handle), key)) return 0;
 
         OpenVR.Overlay.SetOverlayWidthInMeters(handle, widthInMeters);
 
@@ -489,7 +515,7 @@ internal sealed class OpenVrOverlays(ILogger logger) : IVrOverlays
     {
         ulong handle = 0;
 
-        if (OpenVR.Overlay.CreateOverlay(key, name, ref handle) != EVROverlayError.None) return 0;
+        if (Refused(OpenVR.Overlay.CreateOverlay(key, name, ref handle), key)) return 0;
 
         OpenVR.Overlay.SetOverlayWidthInMeters(handle, widthInMeters);
 
