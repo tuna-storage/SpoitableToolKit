@@ -18,6 +18,7 @@ namespace SpoitableToolKit.Host.Ui.Vr;
 /// <see cref="VrHost.Tick"/> を回す器。SteamVR が起動するまでは CEF を触らない（面は繋がってから作る — トレイに常駐しているだけの間は CEF プロセスが 0、という約束を壊さないため）。
 /// <c>SPOITABLE_NO_VR</c> を入れると一切動かない（開発機に SteamVR が入っているので、これが無いと試験の最中にヘッドセットへ板が出る）。
 /// 手首の板と空間の窓も同じ周で回す（<see cref="WristHost"/> / <see cref="VrWindowHost"/>）。窓の面は最初に開いたときに作る（開かない人の RAM を増やさない）。
+/// 面は板と一緒に作り、一緒に捨てる: ダッシュボードの面はパネル（<see cref="VrHost.DashboardUp"/>）、手首と窓の面は <see cref="VrHost.OverlayUp"/> の変わり目で。設定で切った所の browser は残さない。
 /// </summary>
 internal sealed class VrLoop : IDisposable, IVrControls
 {
@@ -80,7 +81,7 @@ internal sealed class VrLoop : IDisposable, IVrControls
         }
 
         var loop = new VrLoop(logger);
-        loop.Run(broadcast, bridge, new ConfiguredWrist(config, configs), new ConfiguredWindow(config, configs));
+        loop.Run(broadcast, bridge, new ConfiguredWrist(config, configs), new ConfiguredWindow(config, configs), () => VrFeatures.Of(config));
 
         // 手首のボタンから頼まれる口。窓口は VR より先に出来ているので後から挿す。
         bridge.Vr = loop;
@@ -107,7 +108,8 @@ internal sealed class VrLoop : IDisposable, IVrControls
         _stopping.Dispose();
     }
 
-    private void Run(UiBroadcast broadcast, UiBridge bridge, IWristSettings wristSettings, IVrWindowSettings windowSettings)
+    private void Run(
+        UiBroadcast broadcast, UiBridge bridge, IWristSettings wristSettings, IVrWindowSettings windowSettings, Func<VrFeatures> features)
     {
         var overlays = new WatchedOverlays(new OpenVrOverlays(_logger), _watch);
 
@@ -178,7 +180,8 @@ internal sealed class VrLoop : IDisposable, IVrControls
             _logger,
             // 手首が先（窓は手首の板の上に出すので、同じ周の手首の姿勢を読む）。
             // Layout Mode の間は入力を全部預かる（VRChat に届かない）。
-            new VrScene(overlays, _logger, [wrist, window], captureAll: () => wrist.InLayout));
+            new VrScene(overlays, _logger, [wrist, window], captureAll: () => wrist.InLayout),
+            features);
 
         // UI スレッドで回す。打つのは VrPacer のスレッドだが、周の中身はこの UI スレッドへ投げて走らせる
         // （窓が先に出来ているので、ここには WinForms の SynchronizationContext が入っている）。
@@ -199,45 +202,14 @@ internal sealed class VrLoop : IDisposable, IVrControls
                 // 画面から頼まれたことを先に片付ける。繋がっていなければ捨てる（窓が見る: 板が無ければ受けない）。
                 while (_requests.TryDequeue(out var request)) _watch.Inside("doing what the wrist asked", request);
 
-                var wasRunning = host.Running;
+                var hadDashboard = host.DashboardUp;
+                var hadOverlay = host.OverlayUp;
 
                 host.Tick();
 
-                if (!wasRunning && host.Running)
-                {
-                    _surface = _watch.Inside(
-                        "creating the VR browser",
-                        // surface=dashboard はシェルに「デスクトップの窓ではない」を伝える印。付けないと、最小化・最大化・✕ とタイトルバーの掴みがデスクトップの窓へ効く（✕ でアプリが閉じる）。
-                        () => new VrSurface(
-                            $"{CefRuntime.UiOrigin}/index.html?surface=dashboard", broadcast, bridge, _shared, _logger,
-                            frameRate: (int)MathF.Round(host.FrameRate)));
-
-                    // 手首の browser は繋がった時点で作る（見たときに作るのではなく）。
-                    // 答え待ちの通知は getStatus で拾い直せないので、後から作ると届いた分を取りこぼす。見ていない間は眠らせておくので、描く手間は掛からない。
-                    if (wrist.Running)
-                    {
-                        _wristSurface = _watch.Inside(
-                            "creating the wrist browser",
-                            () => new VrSurface(
-                                $"{CefRuntime.UiOrigin}/wrist.html", broadcast, bridge, _wristShared, _logger,
-                                WristHost.Width, WristHost.Height, WristHost.Channels, (int)MathF.Round(host.FrameRate)));
-                        _wristSurface.SetHidden(!wrist.Shown);
-                    }
-                }
-                else if (wasRunning && !host.Running)
-                {
-                    _watch.Inside("closing the VR browser", () =>
-                    {
-                        // 手首のタイルを押したまま SteamVR が閉じた。離しはもう届かない。
-                        bridge.Gestures.CutOff();
-                        _surface?.Dispose();
-                        _wristSurface?.Dispose();
-                        _windowSurface?.Dispose();
-                    });
-                    _surface = null;
-                    _wristSurface = null;
-                    _windowSurface = null;
-                }
+                // 繋ぎを返した周は、パネルも手首も下りている（両方の面を捨てる）。
+                FollowDashboard(hadDashboard, host, broadcast, bridge);
+                FollowOverlay(hadOverlay, host, wrist, broadcast, bridge);
 
                 // 板に 1 枚描かせる。CEF は自分では描かない（こちらが打ったときだけ描く）ので、周の速さがそのまま板の絵の速さになる。
                 // 手首は出ている間だけ（眠らせている間は打たない）。手首が出た周（wrist.Tick で起こした周）にも打つので、起こした直後の絵が古いまま残らない。
@@ -281,6 +253,55 @@ internal sealed class VrLoop : IDisposable, IVrControls
         _window = window;
 
         _watchdog = new System.Threading.Timer(_ => Watch(), null, 1_000, 1_000);
+    }
+
+    /// <summary>ダッシュボードのパネルが上がったら面を作り、下りたら捨てる（設定で切った・繋ぎを返した）。</summary>
+    private void FollowDashboard(bool had, VrHost host, UiBroadcast broadcast, UiBridge bridge)
+    {
+        if (!had && host.DashboardUp)
+        {
+            _surface = _watch.Inside(
+                "creating the VR browser",
+                // surface=dashboard はシェルに「デスクトップの窓ではない」を伝える印。付けないと、最小化・最大化・✕ とタイトルバーの掴みがデスクトップの窓へ効く（✕ でアプリが閉じる）。
+                () => new VrSurface(
+                    $"{CefRuntime.UiOrigin}/index.html?surface=dashboard", broadcast, bridge, _shared, _logger,
+                    frameRate: (int)MathF.Round(host.FrameRate)));
+        }
+        else if (had && !host.DashboardUp)
+        {
+            _watch.Inside("closing the VR browser", () => _surface?.Dispose());
+            _surface = null;
+        }
+    }
+
+    /// <summary>手首の帯と VR ウィンドウが立ったら手首の面を作り、畳まれたら手首と窓の面を捨てる（窓の面は次に開いたときに作り直す: <see cref="ShowInWindow"/>）。</summary>
+    private void FollowOverlay(bool had, VrHost host, WristHost wrist, UiBroadcast broadcast, UiBridge bridge)
+    {
+        if (!had && host.OverlayUp)
+        {
+            // 手首の browser は立てた時点で作る（見たときに作るのではなく）。
+            // 答え待ちの通知は getStatus で拾い直せないので、後から作ると届いた分を取りこぼす。見ていない間は眠らせておくので、描く手間は掛からない。
+            if (!wrist.Running) return;
+
+            _wristSurface = _watch.Inside(
+                "creating the wrist browser",
+                () => new VrSurface(
+                    $"{CefRuntime.UiOrigin}/wrist.html", broadcast, bridge, _wristShared, _logger,
+                    WristHost.Width, WristHost.Height, WristHost.Channels, (int)MathF.Round(host.FrameRate)));
+            _wristSurface.SetHidden(!wrist.Shown);
+        }
+        else if (had && !host.OverlayUp)
+        {
+            _watch.Inside("closing the wrist and VR window browsers", () =>
+            {
+                // 手首のタイルを押したまま畳まれた（SteamVR が閉じた・設定で切った）。離しはもう届かない。
+                bridge.Gestures.CutOff();
+                _wristSurface?.Dispose();
+                _windowSurface?.Dispose();
+            });
+            _wristSurface = null;
+            _windowSurface = null;
+        }
     }
 
     /// <summary>借りて渡す。錠を待っている間と、借りている間とを分けて名札を付ける。借りている間の外への呼び出し（SetOverlayTexture）は <c>WatchedOverlays</c> が名札を付け直す。</summary>

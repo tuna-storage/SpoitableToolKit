@@ -22,6 +22,16 @@ public sealed class HostConfigTests
         Assert.False(new HostConfig().StoreApiRequests);
     }
 
+    /// <summary>VR オーバーレイ（手首の帯と VR ウィンドウ）も SteamVR のダッシュボードのパネルも、既定で使う（入れる前と同じ動き）。</summary>
+    [Fact]
+    public void TheVrOverlayAndTheDashboardAreOnByDefault()
+    {
+        var config = new HostConfig();
+
+        Assert.True(config.VrOverlay);
+        Assert.True(config.VrDashboard);
+    }
+
     [Fact]
     public void AppUpdatesLookAtStableByThemselvesByDefault()
     {

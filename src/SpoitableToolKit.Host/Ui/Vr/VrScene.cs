@@ -19,6 +19,12 @@ internal sealed class VrScene(
 
     private readonly List<VrLaserTarget> _targets = [];
 
+    /// <summary>
+    /// 前の周に入力を全部預かって読んだか。預かったまま止めると、優先度の高い action set が SteamVR に最後に渡したまま残りうる（下のアプリ = VRChat に入力が届かないまま）。
+    /// 繋ぎごと返すときは SteamVR が片付けるが、手首と窓だけを畳んでダッシュボードのパネルで繋ぎを保つときは、このあと手を読む周が来ない。
+    /// </summary>
+    private bool _holding;
+
     public VrPointing Pointing { get; } = new(overlays, logger, now);
 
     public void Start()
@@ -31,17 +37,28 @@ internal sealed class VrScene(
     /// <summary>
     /// 畳む。レーザーは押したままのボタンを離し、<c>:hover</c> を外す報せを送ってから点を消す
     /// （browser を捨てるのは <see cref="VrLoop"/> で、これより後）。
+    /// 入力を預かっていたら（Layout Mode の間）、手をもう 1 度だけ読んで預かりを解く（周の外で手を読むのはここだけ）。
     /// </summary>
     public void Stop()
     {
         Pointing.Stop();
 
         for (var i = owners.Count - 1; i >= 0; i--) owners[i].Stop();
+
+        // 預かったまま畳まない。普段の set（読むだけで、VRChat から取り上げない）で 1 度読み直して、預かりを解く。
+        if (_holding)
+        {
+            _holding = false;
+            overlays.ReadHands(false);
+        }
     }
 
     public void Tick()
     {
-        var hands = overlays.ReadHands(_captureAll());
+        var capture = _captureAll();
+        var hands = overlays.ReadHands(capture);
+        _holding = capture;
+
         var dashboardOpen = overlays.DashboardOpen();
 
         _targets.Clear();

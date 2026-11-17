@@ -1584,6 +1584,24 @@ public class WristHostTests
         Assert.False(rig.Overlays.Captures.Last());
     }
 
+    /// <summary>
+    /// <b>預かったまま畳まない。</b> 手首と窓だけを切ってダッシュボードのパネルで繋ぎを保つと、そのあと手を読む周が来ない。
+    /// 最後に渡した優先度の高い set が SteamVR に残ると VRChat に入力が届かないままになりうるので、畳むときに普段の set で読み直す。
+    /// </summary>
+    [Fact]
+    public void PuttingItAwayInLayoutModeGivesTheInputsBack()
+    {
+        var rig = new Rig();
+        rig.StartFacing();
+        rig.Unlock();
+        rig.Tick();
+        Assert.True(rig.Overlays.Captures.Last());
+
+        rig.Scene.Stop();
+
+        Assert.False(rig.Overlays.Captures.Last());
+    }
+
     /// <summary>止めたら、<b>次に付けたときは固定から始める</b>。</summary>
     [Fact]
     public void StoppingLocksAgain()

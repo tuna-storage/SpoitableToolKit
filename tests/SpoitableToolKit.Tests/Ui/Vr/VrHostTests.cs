@@ -11,14 +11,27 @@ namespace SpoitableToolKit.Tests.Ui.Vr;
 public class VrHostTests
 {
     private static VrHost Host(
-        FakeOverlays overlays, Func<VrFrame>? frames = null, List<string>? sent = null, WristHost? wrist = null) =>
+        FakeOverlays overlays, Func<VrFrame>? frames = null, List<string>? sent = null, WristHost? wrist = null, Switches? switches = null) =>
         new(
             overlays,
             use => use((frames ?? (() => VrFrame.None))()),
             (kind, x, y, button, wheelX, wheelY) =>
                 sent?.Add($"{kind} {x},{y} {button} wheel={wheelX},{wheelY}"),
             NullLogger.Instance,
-            wrist is null ? null : new VrScene(overlays, NullLogger.Instance, [wrist]));
+            wrist is null ? null : new VrScene(overlays, NullLogger.Instance, [wrist]),
+            switches is null ? null : switches.Now);
+
+    /// <summary>設定の 2 つ（VR オーバーレイ・SteamVR のダッシュボード）。周ごとに読まれるので、試験の途中で書き換えれば次の周から効く。</summary>
+    private sealed class Switches
+    {
+        public bool Overlay { get; set; } = true;
+
+        public bool Dashboard { get; set; } = true;
+
+        public VrFeatures Now() => new(Overlay, Dashboard);
+    }
+
+    private const string DashboardKey = "dev.f2a.spoitable.dashboard";
 
     private static WristHost Wrist(FakeOverlays overlays) =>
         new(overlays, new NoWristSettings(), use => use(VrFrame.None), (_, _, _, _, _, _) => { }, _ => { }, _ => { },
@@ -570,6 +583,296 @@ public class VrHostTests
         Assert.Equal(2, overlays.PoseReads);
     }
 
+    /// <summary>
+    /// <b>両方切ってある間は SteamVR のことを何も見ない。</b> 繋ぎに行かないのはもちろん、居るかを見に行くのもやめる
+    /// （起動したときから切ってあれば、最初から繋ぎに行かない）。
+    /// </summary>
+    [Fact]
+    public void NothingIsTouchedWhileBothAreOff()
+    {
+        var overlays = new FakeOverlays();
+        var host = Host(overlays, wrist: Wrist(overlays), switches: new Switches { Overlay = false, Dashboard = false });
+
+        host.Tick();
+        host.Tick();
+        host.Tick();
+
+        Assert.False(host.Running);
+        Assert.Equal(0, overlays.AvailabilityChecks);
+        Assert.Equal(0, overlays.Starts);
+        Assert.Empty(overlays.Created);
+    }
+
+    /// <summary>切ってあった所を入れたら、次の周に繋ぐ。繋ぐ前の判断（居るかを見る）は今までどおり通る。</summary>
+    [Fact]
+    public void TurningOneOnConnectsOnTheNextTick()
+    {
+        var overlays = new FakeOverlays();
+        var switches = new Switches { Overlay = false, Dashboard = false };
+        var host = Host(overlays, switches: switches);
+
+        host.Tick();
+        switches.Dashboard = true;
+        host.Tick();
+
+        Assert.True(host.Running);
+        Assert.True(host.DashboardUp);
+        Assert.Equal(1, overlays.AvailabilityChecks);
+        Assert.Equal(1, overlays.Starts);
+    }
+
+    /// <summary>ダッシュボードだけ: 手首の板も両手の点も作らず、手も読みに行かない。</summary>
+    [Fact]
+    public void WithOnlyTheDashboardNoWristOrPointerIsMade()
+    {
+        var overlays = new FakeOverlays();
+        var wrist = Wrist(overlays);
+        var host = Host(overlays, wrist: wrist, switches: new Switches { Overlay = false });
+
+        host.Tick();
+        host.Tick();
+
+        Assert.True(host.DashboardUp);
+        Assert.False(host.OverlayUp);
+        Assert.False(wrist.Running);
+        Assert.Equal([DashboardKey], overlays.Created);
+        Assert.Empty(overlays.Sprites);
+        Assert.Equal(0, overlays.HandReads);
+    }
+
+    /// <summary>手首と窓だけ: ダッシュボードのパネルを作らない。無いパネルへレーザーを読みにも、絵を渡しにも行かない。</summary>
+    [Fact]
+    public void WithOnlyTheOverlayNoDashboardIsMade()
+    {
+        var overlays = new FakeOverlays();
+        var wrist = Wrist(overlays);
+        var host = Host(overlays, () => new VrFrame(4242, 1), wrist: wrist, switches: new Switches { Dashboard = false });
+
+        host.Tick();
+        host.Tick();
+
+        Assert.True(host.Running);
+        Assert.False(host.DashboardUp);
+        Assert.True(wrist.Running);
+        Assert.Equal([WristHost.Key], overlays.Created);
+        Assert.False(overlays.InputEnabled);
+        Assert.Equal(0, overlays.Polls);
+        Assert.Equal(0, overlays.Uploaded);
+        Assert.Equal(1, overlays.HandReads);
+    }
+
+    /// <summary>動いている間にダッシュボードを切る: パネルだけ消して、繋ぎは返さない。手首は回り続ける。</summary>
+    [Fact]
+    public void TurningTheDashboardOffLeavesTheWristRunning()
+    {
+        var overlays = new FakeOverlays();
+        var switches = new Switches();
+        var wrist = Wrist(overlays);
+        var host = Host(overlays, wrist: wrist, switches: switches);
+
+        host.Tick();
+        switches.Dashboard = false;
+        host.Tick();
+        host.Tick();
+
+        Assert.True(host.Running);
+        Assert.False(host.DashboardUp);
+        Assert.Equal([FakeOverlays.DashboardHandle], overlays.DestroyedHandles);
+        Assert.False(overlays.Stopped);
+        Assert.Equal(0, overlays.Polls);
+        Assert.True(wrist.Running);
+        Assert.Equal(2, overlays.PoseReads);
+    }
+
+    /// <summary>入れ直したら作り直して、触れるようにし直す。作り直したパネルは何も持っていないので、同じ番号の絵でも上げ直す。</summary>
+    [Fact]
+    public void TurningTheDashboardBackOnMakesItAgain()
+    {
+        var overlays = new FakeOverlays();
+        var switches = new Switches();
+        var host = Host(overlays, () => new VrFrame(4242, 1), switches: switches);
+
+        host.Tick();   // 繋ぐ
+        host.Tick();   // 上げる
+        switches.Dashboard = false;
+        host.Tick();
+        switches.Dashboard = true;
+        host.Tick();
+
+        Assert.True(host.DashboardUp);
+        Assert.Equal([DashboardKey, DashboardKey], overlays.Created);
+        Assert.Equal(2, overlays.InputEnables);
+        Assert.Equal(2, overlays.Uploaded);
+        Assert.Equal(1, overlays.Starts);
+    }
+
+    /// <summary>動いている間に手首と窓を切る: 手首の板と両手の点を消して、繋ぎとダッシュボードは残す（手も読まなくなる）。</summary>
+    [Fact]
+    public void TurningTheOverlayOffKeepsTheDashboard()
+    {
+        var overlays = new FakeOverlays();
+        var switches = new Switches();
+        var wrist = Wrist(overlays);
+        var host = Host(overlays, () => new VrFrame(4242, 1), wrist: wrist, switches: switches);
+
+        host.Tick();
+        switches.Overlay = false;
+        host.Tick();
+        host.Tick();
+
+        Assert.True(host.Running);
+        Assert.False(host.OverlayUp);
+        Assert.False(wrist.Running);
+        Assert.Equal([FakeOverlays.WristHandle], overlays.DestroyedHandles);
+        Assert.Equal(2, overlays.SpritesDestroyed);
+        Assert.False(overlays.Stopped);
+        Assert.Equal(0, overlays.HandReads);
+        Assert.True(host.DashboardUp);
+        Assert.Equal(1, overlays.Uploaded);
+    }
+
+    [Fact]
+    public void TurningTheOverlayBackOnStartsTheWristAgain()
+    {
+        var overlays = new FakeOverlays();
+        var switches = new Switches();
+        var wrist = Wrist(overlays);
+        var host = Host(overlays, wrist: wrist, switches: switches);
+
+        host.Tick();
+        switches.Overlay = false;
+        host.Tick();
+        switches.Overlay = true;
+        host.Tick();
+
+        Assert.True(host.OverlayUp);
+        Assert.True(wrist.Running);
+        Assert.Equal(4, overlays.Sprites.Count);
+        Assert.Equal(1, overlays.Starts);
+    }
+
+    /// <summary>
+    /// 両方切ったら繋ぎを返す。板と点を<b>全部消してから</b>返す（返したあとに消しに行かない）。
+    /// 返したあとは、切ってある間ずっと SteamVR のことを何も見ない。
+    /// </summary>
+    [Fact]
+    public void TurningBothOffPutsEverythingAwayAndLetsGo()
+    {
+        var overlays = new FakeOverlays();
+        var switches = new Switches();
+        var wrist = Wrist(overlays);
+        var host = Host(overlays, wrist: wrist, switches: switches);
+
+        host.Tick();
+        switches.Overlay = false;
+        switches.Dashboard = false;
+        host.Tick();
+
+        Assert.False(host.Running);
+        Assert.False(host.DashboardUp);
+        Assert.False(host.OverlayUp);
+        Assert.True(overlays.Stopped);
+        Assert.True(overlays.DestroyedBeforeStop);
+        Assert.Equal(2, overlays.Destroyed);
+        Assert.Equal(2, overlays.SpritesDestroyed);
+
+        host.Tick();
+        host.Tick();
+
+        Assert.Equal(1, overlays.Starts);
+        Assert.Equal(1, overlays.AvailabilityChecks);
+    }
+
+    /// <summary>
+    /// こちらから手放したあとは、入れ直せば次の周に繋ぐ。待つのは SteamVR が閉じると言ったときだけ
+    /// （手放しただけで SteamVR は居続けるので、閉じるのを待つと 30 秒ほど繋がらない）。
+    /// </summary>
+    [Fact]
+    public void TurningOneBackOnAfterLettingGoConnectsRightAway()
+    {
+        var overlays = new FakeOverlays();
+        var switches = new Switches();
+        var host = Host(overlays, wrist: Wrist(overlays), switches: switches);
+
+        host.Tick();
+        switches.Overlay = false;
+        switches.Dashboard = false;
+        host.Tick();
+
+        switches.Overlay = true;
+        host.Tick();
+
+        Assert.True(host.Running);
+        Assert.True(host.OverlayUp);
+        Assert.Equal(2, overlays.Starts);
+    }
+
+    /// <summary>
+    /// 繋いでいる間に入れたパネルが作れなかったら、手首はそのまま動かし、<b>作り直しを毎周しない</b>（周の速さで警告が並ぶ）。
+    /// 切って入れ直したら、また作りに行く。
+    /// </summary>
+    [Fact]
+    public void ADashboardThatCannotBeMadeMidwayIsNotRetriedEveryTick()
+    {
+        var overlays = new FakeOverlays();
+        var switches = new Switches { Dashboard = false };
+        var wrist = Wrist(overlays);
+        var host = Host(overlays, wrist: wrist, switches: switches);
+
+        host.Tick();
+        overlays.CreateFails = true;
+        switches.Dashboard = true;
+        host.Tick();
+        host.Tick();
+        host.Tick();
+
+        Assert.Equal(1, overlays.DashboardAttempts);
+        Assert.True(host.Running);
+        Assert.True(wrist.Running);
+        Assert.False(overlays.Stopped);
+
+        overlays.CreateFails = false;
+        switches.Dashboard = false;
+        host.Tick();
+        switches.Dashboard = true;
+        host.Tick();
+
+        Assert.True(host.DashboardUp);
+        Assert.Equal(2, overlays.DashboardAttempts);
+    }
+
+    /// <summary>
+    /// パネルしか使わないのに、そのパネルが無い（作れなかった）なら繋ぎを返す。「居るのに何も出さないアプリ」で居座らず、
+    /// 次の周に繋ぎ直すところからやり直す（繋いだ周にパネルを作り直す）。
+    /// </summary>
+    [Fact]
+    public void WhenOnlyAMissingDashboardIsLeftTheConnectionIsGivenBack()
+    {
+        var overlays = new FakeOverlays();
+        var switches = new Switches { Dashboard = false };
+        var wrist = Wrist(overlays);
+        var host = Host(overlays, wrist: wrist, switches: switches);
+
+        host.Tick();
+        overlays.CreateFails = true;
+        switches.Dashboard = true;
+        host.Tick();
+
+        switches.Overlay = false;
+        host.Tick();
+
+        Assert.False(host.Running);
+        Assert.True(overlays.Stopped);
+        Assert.False(wrist.Running);
+
+        overlays.CreateFails = false;
+        host.Tick();
+
+        Assert.True(host.Running);
+        Assert.True(host.DashboardUp);
+        Assert.Equal(2, overlays.Starts);
+    }
+
     private sealed class NoWristSettings : IWristSettings
     {
         public VrHand Hand => VrHand.Left;
@@ -599,7 +902,28 @@ public class VrHostTests
 
         public bool StartFails { get; set; }
 
-        public bool CreateFails { get; init; }
+        public bool CreateFails { get; set; }
+
+        /// <summary>居るかを見に来た回数。両方切ってある間は 0 のまま（SteamVR のことを何も見ない）。</summary>
+        public int AvailabilityChecks { get; private set; }
+
+        /// <summary>ダッシュボードのパネルを作りに来た回数（作れなかった回も数える）。</summary>
+        public int DashboardAttempts { get; private set; }
+
+        /// <summary>消した板の handle（点は <see cref="SpritesDestroyed"/> で別に数える）。ダッシュボードは <see cref="DashboardHandle"/>、手首は <see cref="WristHandle"/>。</summary>
+        public List<ulong> DestroyedHandles { get; } = [];
+
+        public const ulong DashboardHandle = 42;
+
+        public const ulong WristHandle = 43;
+
+        public int InputEnables { get; private set; }
+
+        /// <summary>ダッシュボードのレーザーを読みに来た回数。</summary>
+        public int Polls { get; private set; }
+
+        /// <summary>両手を読みに来た回数（自前のレーザーが回った目印）。</summary>
+        public int HandReads { get; private set; }
 
         public bool Quitting { get; set; }
 
@@ -621,7 +945,11 @@ public class VrHostTests
         /// <summary>渡された瞬間に呼ぶ。順番を見る試験のため。</summary>
         public Action? OnUpload { get; init; }
 
-        public bool IsAvailable() => Available;
+        public bool IsAvailable()
+        {
+            AvailabilityChecks++;
+            return Available;
+        }
 
         public bool Start(out string? error)
         {
@@ -644,10 +972,12 @@ public class VrHostTests
 
         public ulong CreateDashboard(string key, string name, float widthInMeters)
         {
+            DashboardAttempts++;
+
             if (CreateFails) return 0;
 
             Created.Add(key);
-            return 42;
+            return DashboardHandle;
         }
 
         public void UploadTexture(ulong handle, nint texture)
@@ -661,10 +991,16 @@ public class VrHostTests
 
         public List<VrPointer> Pointers { get; } = [];
 
-        public void EnableInput(ulong handle, int width, int height) => InputEnabled = true;
+        public void EnableInput(ulong handle, int width, int height)
+        {
+            InputEnabled = true;
+            InputEnables++;
+        }
 
         public IReadOnlyList<VrPointer> PollPointer(ulong handle)
         {
+            Polls++;
+
             var waiting = Pointers.ToArray();
             Pointers.Clear();
             return waiting;
@@ -674,8 +1010,14 @@ public class VrHostTests
 
         public void Destroy(ulong handle)
         {
-            if (handle >= FirstSprite) SpritesDestroyed++;
-            else Destroyed++;
+            if (handle >= FirstSprite)
+            {
+                SpritesDestroyed++;
+                return;
+            }
+
+            Destroyed++;
+            DestroyedHandles.Add(handle);
         }
 
         /// <summary>自前のレーザーの線と点。<b>板とは別に数える</b>（handle は <see cref="FirstSprite"/> から）。</summary>
@@ -699,7 +1041,11 @@ public class VrHostTests
 
         public float? DisplayFrequency() => Frequency;
 
-        public VrHands ReadHands(bool captureAll) => default;
+        public VrHands ReadHands(bool captureAll)
+        {
+            HandReads++;
+            return default;
+        }
 
         public void Pulse(VrHand hand, float seconds, float amplitude)
         {
@@ -710,7 +1056,7 @@ public class VrHostTests
             if (WristFails) return 0;
 
             Created.Add(key);
-            return 43;
+            return WristHandle;
         }
 
         public void Attach(ulong handle, uint device, VrMatrix offset)

@@ -95,6 +95,25 @@ internal sealed class HostConfig : IModuleConfig
     [SpoitableSettingsRange(1, 65535)]
     public int OscPort = 9000;
 
+    /// <summary>
+    /// 手首の帯（ショートカットバー）と VR ウィンドウを使うか。切り替えはその場で効く（VR の周ごとに読む: <see cref="Ui.Vr.VrFeatures"/>）。
+    /// 切ると板も、その browser も片付ける。入れ直したら作り直す。
+    /// <see cref="VrDashboard"/> と両方切ると SteamVR から手を放し、どちらかを入れるまで繋ぎに行かない（SteamVR を起こしうる呼び出しを何もしない）。
+    /// </summary>
+    [SpoitableSettingsGroup("host.settings.group.vr")]
+    [SpoitableSettingsLabelLocalize("host.settings.vrOverlay.label")]
+    [SpoitableSettingsDescriptionLocalize("host.settings.vrOverlay.description")]
+    public bool VrOverlay = true;
+
+    /// <summary>
+    /// SteamVR のダッシュボードにこちらのパネル（タブ）を出すか。切り替えはその場で効く（<see cref="VrOverlay"/> と同じく周ごとに読む）。
+    /// 切ってもダッシュボードそのものは SteamVR のもので、開けば手首の帯と VR ウィンドウは今までどおり隠れる。
+    /// </summary>
+    [SpoitableSettingsGroup("host.settings.group.vr")]
+    [SpoitableSettingsLabelLocalize("host.settings.vrDashboard.label")]
+    [SpoitableSettingsDescriptionLocalize("host.settings.vrDashboard.description")]
+    public bool VrDashboard = true;
+
     /// <summary>VR の手首の板をどちらの手に付けるか。切り替えはその場で効く（周ごとに読む）。</summary>
     [SpoitableSettingsGroup("host.settings.group.vr")]
     [SpoitableSettingsLabelLocalize("host.settings.wristHand.label")]
