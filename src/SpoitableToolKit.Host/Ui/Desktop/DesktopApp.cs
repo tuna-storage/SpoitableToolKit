@@ -8,6 +8,7 @@ using SpoitableToolKit.Host.Ui.Licenses;
 using SpoitableToolKit.Host.Ui.Push;
 using SpoitableToolKit.Host.Ui.Shell;
 using SpoitableToolKit.Host.Ui.Tray;
+using SpoitableToolKit.Host.Ui.Vr;
 
 namespace SpoitableToolKit.Host.Ui.Desktop;
 
@@ -71,7 +72,7 @@ internal sealed class DesktopApp : ApplicationContext, IHostWindow
         if (_offscreen)
             logger.LogInformation("SPOITABLE_UI_OFFSCREEN is set; no tray icon (a second start with the same data folder opens the window)");
         else
-            _tray = new TrayIcon(() => TrayMenu.Build(text), Pressed, Open);
+            _tray = new TrayIcon(() => TrayMenu.Build(text, VrFeatures.Of(config)), Pressed, Open);
 
         _showWait = ThreadPool.RegisterWaitForSingleObject(showRequests, (_, _) => Post(ShowRequested), null, Timeout.Infinite, executeOnlyOnce: false);
 
@@ -113,6 +114,14 @@ internal sealed class DesktopApp : ApplicationContext, IHostWindow
     /// <summary>トレイのメニューで押された。</summary>
     private void Pressed(string id)
     {
+        // VR 機能のチェック。設定の画面と同じ適用の道で書く（config.json・開いている設定の画面・変更の知らせが揃う）。VR の周は次の周で読む。
+        if (TrayMenu.SettingFor(id, _config) is { } change)
+        {
+            _settings.SetHost(change.Key, JsonValue.Create(change.Value));
+            _logger.LogInformation("Set {Key} to {Value} from the tray menu", change.Key, change.Value);
+            return;
+        }
+
         switch (id)
         {
             case TrayMenu.Open:
