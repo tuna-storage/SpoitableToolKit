@@ -185,6 +185,75 @@ public sealed class SettingsPagesTests(AppFixture app) : IClassFixture<AppFixtur
         await Assertions.Expect(Page.Locator("#cfgToc")).ToBeVisibleAsync();
     }
 
+    /// <summary>VR のページの頭に、VR オーバーレイと SteamVR のダッシュボードの 2 つ。既定はどちらも入で、手首の行はその下に今までどおり並ぶ。</summary>
+    [Fact]
+    public async Task TheVrPageStartsWithTheTwoVrSwitches()
+    {
+        await app.OpenSettings("vr");
+
+        var head = await Page.Locator("#viewSettings .cfg-group:not([hidden]) .cfg-item").EvaluateAllAsync<string[]>(
+            "rows => rows.slice(0, 3).map(row => row.dataset.key)");
+        Assert.Equal(["VrOverlay", "VrDashboard", "WristHand"], head);
+
+        await Assertions.Expect(Item("VrOverlay")).ToContainTextAsync("VR オーバーレイを表示する");
+        await Assertions.Expect(Item("VrDashboard")).ToContainTextAsync("SteamVR のダッシュボードに表示する");
+        await Assertions.Expect(Item("VrOverlay").Locator("input[type=checkbox]")).ToBeCheckedAsync();
+        await Assertions.Expect(Item("VrDashboard").Locator("input[type=checkbox]")).ToBeCheckedAsync();
+    }
+
+    /// <summary>切り替えて「適用」すると config.json に残る。VR の周はこの値を毎周読むだけなので、残れば次の周から効く（e2e のアプリは VR を動かさないので、効き目は unit で見る）。</summary>
+    [Fact]
+    public async Task TurningAVrSwitchOffIsSaved()
+    {
+        await app.OpenSettings("vr");
+        var dashboard = Item("VrDashboard").Locator("input[type=checkbox]");
+
+        try
+        {
+            await Assertions.Expect(dashboard).ToBeCheckedAsync();
+            await dashboard.ClickAsync();
+            await Page.Locator("#cfgCommit").ClickAsync();
+            await Assertions.Expect(Page.Locator("#cfgApply")).ToBeHiddenAsync();
+
+            Assert.True(await SavedAsync("VrDashboard", false), "VrDashboard の切が config.json に残らなかった");
+            await Assertions.Expect(dashboard).Not.ToBeCheckedAsync();
+            await Assertions.Expect(Item("VrOverlay").Locator("input[type=checkbox]")).ToBeCheckedAsync();
+        }
+        finally
+        {
+            await Page.EvaluateAsync("() => bridge.applyConfigChanges(JSON.stringify({ host: { VrDashboard: true } }))");
+        }
+    }
+
+    /// <summary>本体の config.json を読み、<paramref name="key"/> が <paramref name="expected"/> になるまで待つ（書き終わる前に読むと、壊れた JSON か前の値が見える）。</summary>
+    private async Task<bool> SavedAsync(string key, bool expected)
+    {
+        var path = Path.Combine(app.DataDirectory, "config.json");
+
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            try
+            {
+                using var json = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(path));
+
+                if (json.RootElement.TryGetProperty(key, out var value)
+                    && value.ValueKind is System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False
+                    && value.GetBoolean() == expected)
+                {
+                    return true;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException)
+            {
+                // 書いている最中。少し待って読み直す。
+            }
+
+            await Task.Delay(100);
+        }
+
+        return false;
+    }
+
     /// <summary>適用して読み直しても、開いていたページのまま。</summary>
     [Fact]
     public async Task ApplyingKeepsTheOpenPage()
