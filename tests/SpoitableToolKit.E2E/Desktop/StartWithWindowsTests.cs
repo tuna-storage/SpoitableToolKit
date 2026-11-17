@@ -44,5 +44,13 @@ public sealed class StartWithWindowsTests(RunKeyAppFixture app) : IClassFixture<
         await RunKeyAppFixture.WaitForAsync(() => app.Registered() is null && !File.Exists(app.Approval), "Windows で切った起動が片付かない");
         Assert.False(app.SavedStartWithWindows());
         Assert.Contains(app.Output, line => line.Contains("turned the setting off to match", StringComparison.Ordinal));
+
+        // 設定の画面を通さずに変えても、変えたその場で合わせる（画面が値を取り直すのを待たない）。
+        // 設定の画面を離れてから、画面の外の道（適用の口を直に呼ぶ）で変える。設定の画面に居ると、知らせを受けた画面が値を取り直してしまう。
+        await Page.EvaluateAsync("() => selectView('log')");
+        await Page.EvaluateAsync("() => bridge.applyConfigChanges(JSON.stringify({ host: { StartWithWindows: true } }))");
+        await RunKeyAppFixture.WaitForAsync(() => Same(app.Registered()), "設定の画面の外で入れても登録が書かれない");
+        await Page.EvaluateAsync("() => bridge.applyConfigChanges(JSON.stringify({ host: { StartWithWindows: false } }))");
+        await RunKeyAppFixture.WaitForAsync(() => app.Registered() is null, "設定の画面の外で切っても登録が消えない");
     }
 }

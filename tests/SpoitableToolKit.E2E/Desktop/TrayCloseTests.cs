@@ -73,6 +73,31 @@ public sealed class TrayCloseTests(AppFixture app) : IClassFixture<AppFixture>
     }
 
     /// <summary>
+    /// 聞きたいのに、シェルのページが答えられない（読み込み中・起動の途中）ときは、聞かずにしまう。設定は聞くのまま（次に閉じるときにまた聞く）。
+    /// 答えられないページは、askClose を false を返すもの（起動の途中のページと同じ答え）に差し替えて作る。
+    /// しまうときに自分で閉じる道が、閉じかけの知らせでもう一度聞きに行かないこと（聞きに行くと、しまえないまま聞き直しが続く）もここで見る。
+    /// </summary>
+    [Fact]
+    public async Task WhenTheScreenCannotAskTheWindowGoesToTheTrayAndAsksNextTime()
+    {
+        await SetCloseButtonAsync("Ask");
+        await Page.EvaluateAsync("() => { window.stk.askClose = () => false; }");
+
+        await Page.Locator("#winClose").ClickAsync();
+        await app.WaitUntilTheWindowIsGoneAsync();
+
+        AssertTheAppIsRunning();
+        Assert.Equal("Ask", Saved("CloseButton") ?? "Ask");
+        Assert.Contains(app.Output, line => line.Contains("Could not ask how to close the window", StringComparison.Ordinal));
+
+        await app.OpenTheWindowFromTheTrayAsync();
+        await Page.Locator("#winClose").ClickAsync();
+        await Assertions.Expect(Modal).ToBeVisibleAsync();
+        await Page.Keyboard.PressAsync("Escape");
+        await Assertions.Expect(Modal).ToBeHiddenAsync();
+    }
+
+    /// <summary>
     /// Alt+F4 とタスクバーの「ウィンドウを閉じる」（システムメニューの「閉じる」）も × と同じで、閉じるのをいったん止めて聞く。
     /// Esc・キャンセル・外を押したら何もしない（窓は開いたまま、設定は聞くのまま、次にまた聞く）。
     /// </summary>
