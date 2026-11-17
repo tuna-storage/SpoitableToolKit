@@ -9,7 +9,7 @@ namespace SpoitableToolKit.Host.Ui.Vr;
 /// 「いつ繋ぐか・いつ諦めるか・いつ絵を上げるか」を決めるところ。OpenVR も CEF も直に触らず（触るのは <see cref="IVrOverlays"/> と <see cref="TextureSource"/> だけ）、ヘッドセットを繋がずに試験が書ける。
 /// 1 周ぶんが <see cref="Tick"/> で、回すのは呼ぶ側。こうしておくと、「起動していない間は何もしない」「閉じられたら畳む」を時間を待たずに確かめられる。
 /// 使う所（<see cref="VrFeatures"/>）は周ごとに聞く。ダッシュボードのパネル（<see cref="DashboardPanel"/>）と、手首の帯と VR ウィンドウ（<see cref="VrScene"/>）は互いに触らずに出し入れする。
-/// 両方切ってあれば SteamVR から手を放し、切ってある間は SteamVR のことを何も見ない。
+/// 両方切ってあれば（繋いでいる間は 2 周続けて見たら）SteamVR から手を放し、切ってある間は SteamVR のことを何も見ない。
 /// </summary>
 /// <param name="features">使う所。周ごとに聞く。null なら両方使う。</param>
 internal sealed class VrHost(
@@ -50,6 +50,12 @@ internal sealed class VrHost(
 
     /// <summary>前の周に聞いた使う所。変わったときだけログに出す。</summary>
     private VrFeatures? _seen;
+
+    /// <summary>繋いでいる間に、両方切を何周続けて見たら手放すか。起動したときに両方切なら、これを待たずに最初から繋がない。</summary>
+    internal const int BothOffTicksBeforeLettingGo = 2;
+
+    /// <summary>繋いでいる間に、両方切を続けて見た周の数。</summary>
+    private int _bothOffTicks;
 
     /// <summary>SteamVR に繋いでいるか（<c>OpenVR.Init</c> が通って、まだ <c>Shutdown</c> していない）。パネルも手首も無くても、繋いでいれば true。</summary>
     public bool Running { get; private set; }
@@ -100,11 +106,17 @@ internal sealed class VrHost(
 
         if (wanted.None)
         {
+            // 1 周だけなら手放さない（この周は何もしない）。設定の適用は値を 1 つずつ書くので、片方を切ってもう片方を入れる適用の途中を読むと、
+            // 一瞬だけ両方切に見える。そこで手放すと、繋ぎ直しが 1 回余計に入る。
+            if (++_bothOffTicks < BothOffTicksBeforeLettingGo) return;
+
             // こちらから手放す。SteamVR は居続けるので、閉じるのを待つ印（_leaving）は立てない。
             logger.LogInformation("The VR overlay and the SteamVR dashboard are both off; disconnecting from SteamVR");
             Stop();
             return;
         }
+
+        _bothOffTicks = 0;
 
         if (!Follow(wanted)) return;
 
@@ -171,6 +183,7 @@ internal sealed class VrHost(
 
         _dashboard.Close();
         _dashboardRefused = false;
+        _bothOffTicks = 0;
 
         Running = false;
         overlays.Stop();

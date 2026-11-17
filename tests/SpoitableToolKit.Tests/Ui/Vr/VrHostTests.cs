@@ -752,7 +752,7 @@ public class VrHostTests
     }
 
     /// <summary>
-    /// 両方切ったら繋ぎを返す。板と点を<b>全部消してから</b>返す（返したあとに消しに行かない）。
+    /// 両方切ったら（2 周続けて見たら）繋ぎを返す。板と点を<b>全部消してから</b>返す（返したあとに消しに行かない）。
     /// 返したあとは、切ってある間ずっと SteamVR のことを何も見ない。
     /// </summary>
     [Fact]
@@ -766,6 +766,7 @@ public class VrHostTests
         host.Tick();
         switches.Overlay = false;
         switches.Dashboard = false;
+        host.Tick();
         host.Tick();
 
         Assert.False(host.Running);
@@ -798,6 +799,7 @@ public class VrHostTests
         switches.Overlay = false;
         switches.Dashboard = false;
         host.Tick();
+        host.Tick();
 
         switches.Overlay = true;
         host.Tick();
@@ -805,6 +807,52 @@ public class VrHostTests
         Assert.True(host.Running);
         Assert.True(host.OverlayUp);
         Assert.Equal(2, overlays.Starts);
+    }
+
+    /// <summary>
+    /// 両方切に見えたのが 1 周だけなら手放さない。設定の適用は値を 1 つずつ書くので、VR オーバーレイを切ってダッシュボードを入れる適用の途中を読むと、
+    /// 一瞬だけ両方切に見える。そこで手放すと、約 2 秒後に繋ぎ直すまで両方とも消え、繋ぎ直しが 1 回余計に入る。2 周続けば手放す。
+    /// </summary>
+    [Fact]
+    public void BothOffForOneTickOnlyKeepsTheConnection()
+    {
+        var overlays = new FakeOverlays();
+        var switches = new Switches { Dashboard = false };
+        var wrist = Wrist(overlays);
+        var host = Host(overlays, wrist: wrist, switches: switches);
+
+        host.Tick();
+
+        // 適用の途中: VrOverlay だけが切に書かれ、VrDashboard はまだ切のまま。
+        switches.Overlay = false;
+        host.Tick();
+
+        Assert.True(host.Running);
+        Assert.False(overlays.Stopped);
+
+        // 適用が済んだ: VrDashboard も入に書かれた。繋ぎ直さずに、そのまま切り替わる。
+        switches.Dashboard = true;
+        host.Tick();
+
+        Assert.True(host.Running);
+        Assert.True(host.DashboardUp);
+        Assert.False(host.OverlayUp);
+        Assert.Equal(1, overlays.Starts);
+        Assert.False(overlays.Stopped);
+
+        // 切が 1 周ずつ途切れて続いても、続けて 2 周でなければ手放さない。続けて 2 周なら手放す。
+        switches.Overlay = false;
+        switches.Dashboard = false;
+        host.Tick();
+        Assert.True(host.Running);
+        switches.Dashboard = true;
+        host.Tick();
+        switches.Dashboard = false;
+        host.Tick();
+        Assert.True(host.Running);
+        host.Tick();
+        Assert.False(host.Running);
+        Assert.True(overlays.Stopped);
     }
 
     /// <summary>
