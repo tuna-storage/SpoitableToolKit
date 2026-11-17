@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SpoitableToolKit.Abstractions;
@@ -311,6 +312,9 @@ public sealed class HrsModule : ISpoitableModule, IConfigEventListener<HrsConfig
             "connect" => _capture.Connect(),
             "disconnect" => _capture.Disconnect(),
 
+            // 心拍計タブの行の「接続」。設定の「心拍計」をその 1 台にして、すぐに繋ぎ替える。{"name":…,"address":"AA:BB:CC:DD:EE:FF"}
+            "useMonitor" => Task.FromResult(UseMonitor(payload)),
+
             // 見当たらないと言われたルールを足す。**押した人が居るので UAC が出てよい。**
             "addFirewallRule" => _firewall.AddRule(),
             _ => throw new ArgumentException($"Unknown method: {method}", nameof(method)),
@@ -366,14 +370,7 @@ public sealed class HrsModule : ISpoitableModule, IConfigEventListener<HrsConfig
         // ループが設定から読み直すので、名前を 1 つ直すたびに心拍計が切れるのは困る。
         if (e.Changed(c => c.Device))
         {
-            // 前のデバイスのグラフは畳む。後ろに繋げても意味が無い。
-            _log.Clear();
-
-            // 選び直したので、手で切った印は全部外す（残すと、新しい指定の心拍計が離れたときに「前に切った 1 台は切断してあります」と出て、
-            // 探している最中の「切断」も出なくなる）。
-            if (_source?.Reconnect() is true) _logger.LogInformation("Heart rate source: the monitor setting changed; forgetting the ones disconnected by hand");
-
-            _capture.Start();
+            SwitchDevice();
         }
         else if (hds)
         {
@@ -384,6 +381,72 @@ public sealed class HrsModule : ISpoitableModule, IConfigEventListener<HrsConfig
 
         PushStatus();
     }
+
+    /// <summary>
+    /// 繋ぐ心拍計の指定が変わった（設定の画面の「適用」・心拍計タブの行の「接続」）。前の心拍計のグラフを畳み、手で切った印を外し、周回を作り直す。
+    /// </summary>
+    private void SwitchDevice()
+    {
+        // 前のデバイスのグラフは畳む。後ろに繋げても意味が無い。
+        _log.Clear();
+
+        // 選び直したので、手で切った印は全部外す（残すと、新しい指定の心拍計が離れたときに「前に切った 1 台は切断してあります」と出て、
+        // 探している最中の「切断」も出なくなる）。
+        if (_source?.Reconnect() is true) _logger.LogInformation("Heart rate source: the monitor setting changed; forgetting the ones disconnected by hand");
+
+        _capture.Start();
+    }
+
+    /// <summary>
+    /// 心拍計タブの行の「接続」。設定の「心拍計」（<see cref="HrsConfig.Device"/>）をその 1 台（<c>名前 [アドレス]</c>）にして、すぐに繋ぎ替える。
+    /// <para>
+    /// 値はここで組む（<see cref="MonitorIdentity.ToSuggestion"/> — 設定の候補と同じ形）。アドレスは厳しく読み、読めなければ何も書かない。
+    /// 書いたら保存して設定の画面へ知らせ（<see cref="IModuleHost.SaveConfig"/>）、設定の画面で変えたときと同じ繋ぎ替えを通る（<see cref="SwitchDevice"/>）。
+    /// 設定の画面の「適用」で入る値の確かめ（<see cref="OnConfigChanging"/>）と同じく、<see cref="DeviceSelector"/> で読める値だけを入れる。
+    /// </para>
+    /// <para>
+    /// 値が今と同じ（指定どおりの 1 台を手で切ってある・探している最中）なら設定は書かず、ヘッダーの「接続」と同じ道で繋ぎ直す（手で切った印を外す）。
+    /// </para>
+    /// </summary>
+    private string UseMonitor(string payload)
+    {
+        HrsUseMonitorRequest? request;
+        try
+        {
+            request = JsonSerializer.Deserialize<HrsUseMonitorRequest>(payload, HrsPanelJson.Options);
+        }
+        catch (JsonException)
+        {
+            request = null;
+        }
+
+        if (request is null || !MonitorIdentity.TryParseAddress(request.Address, out var address))
+            return Answer(new HrsUseMonitorAnswer(Accepted: false, Device: null));
+
+        var name = BleSightings.Clean(request.Name ?? "");
+        var device = new MonitorIdentity(address, name.Length > 0 ? name : MonitorIdentity.FormatAddress(address)).ToSuggestion();
+
+        if (!DeviceSelector.TryParse(device, out _, out _))
+            return Answer(new HrsUseMonitorAnswer(Accepted: false, Device: null));
+
+        if (_config.Device == device)
+        {
+            _logger.LogInformation("Heart rate source: connecting {Device} again from the monitors list", device);
+            _ = _capture.Connect();
+            return Answer(new HrsUseMonitorAnswer(Accepted: true, Device: device));
+        }
+
+        _logger.LogInformation("Heart rate source: switching to {Device} from the monitors list", device);
+        _config.Device = device;
+        _host?.SaveConfig();
+
+        SwitchDevice();
+        PushStatus();
+
+        return Answer(new HrsUseMonitorAnswer(Accepted: true, Device: device));
+    }
+
+    private static string Answer(HrsUseMonitorAnswer answer) => JsonSerializer.Serialize(answer, HrsPanelJson.Options);
 
     /// <summary>
     /// 畳む。<b>ここでは待つ。</b>

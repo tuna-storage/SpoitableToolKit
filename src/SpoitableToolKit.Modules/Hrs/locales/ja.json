@@ -120,6 +120,7 @@
   "hrs.panel.overlays.glass": "Liquid Glass · 小さなグラフ付き",
   "hrs.panel.overlays.neon": "サイバーパンク · 円形のゲージ",
   "hrs.panel.overlays.widget": "すべての情報 · グラフと統計",
+  "hrs.panel.devices.connecting": "接続しています…",
   "hrs.panel.firewall.missing": "HDS (Apple Watch) の受信ポート TCP {0} を許可するファイアウォールのルールが見つかりません。Apple Watch から心拍が届かない場合は、これが原因です。",
   "hrs.panel.firewall.blocked": "HDS (Apple Watch) の受信ポート TCP {0} が、ファイアウォールでブロックされています (Windows の確認で「キャンセル」を押すと、このルールが作成されます)。ブロックは許可より優先されるため、削除しないと Apple Watch から心拍が届きません。",
   "hrs.panel.firewall.add": "ファイアウォールに追加",

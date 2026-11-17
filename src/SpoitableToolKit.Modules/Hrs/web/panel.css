@@ -54,7 +54,7 @@ section { margin-top: 1.6em; }
 }
 .stats { padding: .4em .9em .6em; color: var(--faint); font-size: .78em; }
 
-/* 心拍計の一覧。1 行に 名前（とアドレス）｜接続中｜電波の強さ｜最後に見た時刻。右の 2 列は幅をそろえて行をまたいで並べる。狭い窓では名前の下へ折り返す。 */
+/* 心拍計の一覧。1 行に 名前（とアドレス）｜電波の強さ｜最後に見た時刻｜「接続」か「接続中」。右の 3 列は幅をそろえて行をまたいで並べる。狭い窓では名前の下へ折り返す。 */
 .devices { display: flex; flex-direction: column; gap: .4em; }
 .found {
   display: flex; flex-wrap: wrap; align-items: center; gap: .3em .9em; padding: .5em .8em;
@@ -67,7 +67,9 @@ section { margin-top: 1.6em; }
 .found .signal, .found .seen {
   flex: none; min-width: 5em; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
 }
-.found .tag { flex: none; font-size: .8em; color: var(--accent); }
+/* 右端の列。「接続しています…」が収まる幅にそろえる（押すたびに左の列がずれない）。 */
+.found .act { flex: none; min-width: 8.5em; display: flex; justify-content: flex-end; }
+.found .tag { font-size: .8em; color: var(--accent); }
 
 .controls { display: flex; align-items: center; gap: .6em; margin: .6em 0 0; flex-wrap: wrap; }
 

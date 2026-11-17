@@ -281,9 +281,13 @@ public sealed class HrsTests
         /// <summary>偽なら、周回を始めても繋がらない（心拍計が近くに無い人）。</summary>
         public bool ConnectsWhenRun { get; init; } = true;
 
+        /// <summary>最後の周回で探すように言われた相手（設定の「心拍計」から作られる）。</summary>
+        public DeviceSelector? Selector { get; private set; }
+
         public async Task RunAsync(DeviceSelector selector, CancellationToken cancellationToken)
         {
             Runs++;
+            Selector = selector;
             Watching = true;
             if (ConnectsWhenRun)
             {
@@ -306,6 +310,96 @@ public sealed class HrsTests
                 Watching = false;
                 TornDown = true;
             }
+        }
+    }
+
+    /// <summary>
+    /// 心拍計タブの行の「接続」。設定の「心拍計」をその 1 台にする — 値は C# が組む（名前を整えて <c>名前 [アドレス]</c>。設定の候補と同じ形）。
+    /// 保存して設定の画面へ知らせ、設定の画面で変えたときと同じく周回を作り直して、その 1 台を探す。
+    /// </summary>
+    [Fact]
+    public async Task UsingAMonitorFromTheListSavesItAsTheDeviceAndSwitchesToIt()
+    {
+        var (module, host, source) = NewModule();
+        try
+        {
+            await WaitFor(() => source.Runs == 1 && host.Osc.Last("/avatar/parameters/HR") is 72);
+
+            var reply = await module.HandleUiCallAsync("useMonitor", """{"name":"  Belt B  ","address":"00:00:00:00:00:42"}""");
+            using (var answer = JsonDocument.Parse(reply))
+            {
+                Assert.True(answer.RootElement.GetProperty("accepted").GetBoolean());
+                Assert.Equal("Belt B [00:00:00:00:00:42]", answer.RootElement.GetProperty("device").GetString());
+            }
+
+            Assert.Equal("Belt B [00:00:00:00:00:42]", ((HrsConfig)module.Config!).Device);
+            Assert.Equal(1, host.ConfigSaves);
+
+            await WaitFor(() => source.Runs == 2);
+            Assert.Equal(2, source.Runs);
+            Assert.Equal(new DeviceSelector(0x42, "Belt B"), source.Selector);
+        }
+        finally
+        {
+            module.OnShutdown();
+        }
+    }
+
+    /// <summary>アドレスが読めない（<c>AA:BB:CC:DD:EE:FF</c> の形でない・0・無い・JSON でない）なら断り、設定は書かず、周回もそのまま。</summary>
+    [Theory]
+    [InlineData("""{"name":"Belt","address":"nonsense"}""")]
+    [InlineData("""{"name":"Belt","address":"00:00:00:00:00:00"}""")]
+    [InlineData("""{"name":"Belt","address":"00:00:00:00:42"}""")]
+    [InlineData("""{"name":"Belt"}""")]
+    [InlineData("not json")]
+    public async Task AMonitorWithoutAReadableAddressIsRefusedAndNothingIsSaved(string payload)
+    {
+        var (module, host, source) = NewModule();
+        try
+        {
+            await WaitFor(() => source.Runs == 1 && host.Osc.Last("/avatar/parameters/HR") is 72);
+
+            using (var answer = JsonDocument.Parse(await module.HandleUiCallAsync("useMonitor", payload)))
+                Assert.False(answer.RootElement.GetProperty("accepted").GetBoolean());
+
+            await Task.Delay(200);
+            Assert.Equal("", ((HrsConfig)module.Config!).Device);
+            Assert.Equal(0, host.ConfigSaves);
+            Assert.Equal(1, source.Runs);
+        }
+        finally
+        {
+            module.OnShutdown();
+        }
+    }
+
+    /// <summary>
+    /// 指定どおりの 1 台を手で切ってあるときにその行の「接続」を押すと、値は変わらないので設定は書かず、ヘッダーの「接続」と同じく手で切った印を外して繋ぎ直す。
+    /// </summary>
+    [Fact]
+    public async Task UsingTheConfiguredMonitorAfterDisconnectingItByHandConnectsItAgain()
+    {
+        var (module, host, source) = NewModule(c => c.Device = "Fake [A1:B2:C3:D4:E5:F6]");
+        try
+        {
+            await WaitFor(() => host.Osc.Last("/avatar/parameters/HR") is 72);
+            await module.HandleUiCallAsync("disconnect", "{}");
+            Assert.NotNull(source.HeldOff);
+
+            using (var answer = JsonDocument.Parse(await module.HandleUiCallAsync("useMonitor", """{"name":"Fake","address":"A1:B2:C3:D4:E5:F6"}""")))
+            {
+                Assert.True(answer.RootElement.GetProperty("accepted").GetBoolean());
+                Assert.Equal("Fake [A1:B2:C3:D4:E5:F6]", answer.RootElement.GetProperty("device").GetString());
+            }
+
+            Assert.Null(source.HeldOff);
+            Assert.NotNull(source.Connected);
+            Assert.Equal(0, host.ConfigSaves);
+            Assert.Equal(1, source.Runs);
+        }
+        finally
+        {
+            module.OnShutdown();
         }
     }
 

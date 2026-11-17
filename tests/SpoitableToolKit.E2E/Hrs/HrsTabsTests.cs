@@ -37,6 +37,7 @@ public sealed class HrsTabsTests(AppFixture app) : IClassFixture<AppFixture>, IA
               if (window.__realRender) { render = window.__realRender; delete window.__realRender; }
               if (window.__realCall) { spoitable.call = window.__realCall; delete window.__realCall; }
               delete window.__hds;
+              connecting = null;
               render(await spoitable.call('getStatus'));
             }
             """);
@@ -155,6 +156,65 @@ public sealed class HrsTabsTests(AppFixture app) : IClassFixture<AppFixture>, IA
         await Assertions.Expect(other.Locator(".seen")).ToHaveTextAsync("たった今");
         await Assertions.Expect(other.Locator(".tag")).ToHaveCountAsync(0);
         await Assertions.Expect(other).ToHaveClassAsync("found");
+    }
+
+    /// <summary>
+    /// 行の右端の「接続」を押すと、設定の「心拍計」がその 1 台（<c>名前 [アドレス]</c>）になって保存される（設定の画面にも出る）。
+    /// 押した行は繋がるまで「接続しています…」で押せない。接続中の行とアドレスの無い行（時計）には「接続」が無い。
+    /// 3 行目を押す（何番目かではなく、押した行の 1 台が入ることを見る）。アドレスは誰も居ない番号（e2e のアプリは本当に探しに行く）で、終わったら元に戻す。
+    /// </summary>
+    [Fact]
+    public async Task TheConnectButtonOfARowSavesThatMonitorAsTheDevice()
+    {
+        await FreezeRender();
+        await AnswerMonitors(
+            """
+            [
+              { name: 'E2E Belt A', address: '00:00:00:00:00:41', signal: -60, lastSeen: ago(1), connected: true },
+              { name: 'E2E Belt B', address: '00:00:00:00:00:42', signal: -70, lastSeen: ago(1), connected: false },
+              { name: 'E2E Belt C', address: '00:00:00:00:00:43', signal: -80, lastSeen: ago(1), connected: false },
+              { name: '192.168.1.30', connected: false },
+            ]
+            """);
+
+        await Panel.Locator("#tabMonitors").ClickAsync();
+        await Assertions.Expect(Rows).ToHaveCountAsync(4);
+        await Assertions.Expect(Rows.Nth(0).Locator(".tag")).ToHaveTextAsync("接続中");
+        await Assertions.Expect(Rows.Nth(0).Locator(".use")).ToHaveCountAsync(0);
+        await Assertions.Expect(Rows.Nth(3).Locator(".use")).ToHaveCountAsync(0);
+        await Assertions.Expect(Rows.Nth(1).Locator(".use")).ToHaveTextAsync("接続");
+
+        var file = Path.Combine(app.DataDirectory, "module-data", "hrs", "config.json");
+        try
+        {
+            await Rows.Nth(2).Locator(".use").ClickAsync();
+
+            await Assertions.Expect(Rows.Nth(2).Locator(".use")).ToHaveTextAsync("接続しています…");
+            await Assertions.Expect(Rows.Nth(2).Locator(".use")).ToBeDisabledAsync();
+            await Assertions.Expect(Rows.Nth(1).Locator(".use")).ToHaveTextAsync("接続");
+
+            string saved = "";
+            for (var i = 0; i < 40 && !saved.Contains("E2E Belt C [00:00:00:00:00:43]", StringComparison.Ordinal); i++)
+            {
+                await Task.Delay(100);
+                try
+                {
+                    saved = await File.ReadAllTextAsync(file);
+                }
+                catch (IOException)
+                {
+                }
+            }
+            Assert.Contains("\"Device\": \"E2E Belt C [00:00:00:00:00:43]\"", saved, StringComparison.Ordinal);
+
+            await app.OpenSettings("hrs");
+            await Assertions.Expect(Page.Locator("#viewSettings .cfg-item[data-key='Device'] input[type=text]"))
+                .ToHaveValueAsync("E2E Belt C [00:00:00:00:00:43]");
+        }
+        finally
+        {
+            await Page.EvaluateAsync($"() => bridge.applyConfigChanges(JSON.stringify({{ hrs: {{ Device: '{AppFixture.NoHeartRateMonitor}' }} }}))");
+        }
     }
 
     /// <summary>

@@ -503,9 +503,16 @@ function renderChart(samples) {
   el.span.textContent = spoitable.t('hrs.panel.chart.recent', beats);
 }
 
-/// 見えている心拍計（心拍サービスを名乗る広告を出しているものだけ）。1 行に名前・アドレス・「接続中」・電波の強さ・最後に見た時刻。
+/// 見えている心拍計（心拍サービスを名乗る広告を出しているものだけ）。1 行に名前・アドレス・電波の強さ・最後に見た時刻、右端に「接続」か「接続中」。
 /// 「接続中」は C# がアドレスで決めて渡す（名前の前方一致で見ると、「Polar」に繋がっているときに「Polar H10 …」にも付く）。
+/// 「接続」を押した行は、繋がるまで「接続しています…」（押せない）。アドレスの無い行（時計）には「接続」を出さない。
 function renderDevices(found) {
+  shownMonitors = found;
+
+  const now = Date.now();
+  if (connecting && (now > connecting.until || found.some(monitor => monitor.connected && monitor.address === connecting.address)))
+    connecting = null;
+
   if (!found.length) {
     const empty = document.createElement('div');
     empty.className = 'empty';
@@ -514,11 +521,11 @@ function renderDevices(found) {
     return;
   }
 
-  const now = Date.now();
   el.devices.replaceChildren(...found.map(monitor => {
     const row = document.createElement('div');
     row.className = 'found';
     if (monitor.address) row.dataset.address = monitor.address;
+    row.dataset.name = monitor.name;
 
     const who = document.createElement('div');
     who.className = 'who';
@@ -537,16 +544,6 @@ function renderDevices(found) {
     }
     row.appendChild(who);
 
-    // 繋がっている先は分かるようにする。一覧だけだと、どれに繋がったのか分からない。
-    // 印は電波の強さより前に置く（右の 2 列が行をまたいでそろう）。
-    if (monitor.connected) {
-      row.classList.add('here');
-      const tag = document.createElement('span');
-      tag.className = 'tag';
-      tag.textContent = spoitable.t('hrs.panel.devices.here');
-      row.appendChild(tag);
-    }
-
     if (Number.isInteger(monitor.signal)) {
       const signal = document.createElement('span');
       signal.className = 'signal';
@@ -562,8 +559,65 @@ function renderDevices(found) {
       row.appendChild(at);
     }
 
+    // 右端: 繋がっている先は「接続中」（一覧だけだと、どれに繋がったのか分からない）。ほかは「接続」。列の幅はそろえる（左の列が行をまたいでそろう）。
+    const act = document.createElement('span');
+    act.className = 'act';
+    if (monitor.connected) {
+      row.classList.add('here');
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = spoitable.t('hrs.panel.devices.here');
+      act.appendChild(tag);
+    } else if (monitor.address) {
+      const waiting = connecting?.address === monitor.address;
+      const use = document.createElement('button');
+      use.className = 'use';
+      use.textContent = spoitable.t(waiting ? 'hrs.panel.devices.connecting' : 'hrs.panel.connect');
+      use.disabled = waiting;
+      act.appendChild(use);
+    }
+    row.appendChild(act);
+
     return row;
   }));
+}
+
+/// 「接続しています…」を出しておく長さ。過ぎても繋がらなければ「接続」に戻す（押し直せる）。その間もヘッダーには「〜を検索中」が出る。
+const CONNECT_PATIENCE = 30000;
+
+/// 「接続」を押して、まだ繋がっていない 1 台（{ address, until }）。無ければ null。一覧は数秒おきに描き直すので、行ではなくアドレスで覚える。
+let connecting = null;
+
+/// 最後に描いた一覧（押した直後に描き直すため）。
+let shownMonitors = [];
+
+// 行の「接続」。**押した行のアドレスと名前で頼む** — 一覧は数秒おきに並びが変わりうるので、何番目の行かでは引かない。
+el.devices.addEventListener('click', event => {
+  const use = event.target.closest?.('button.use');
+  if (!use || use.disabled) return;
+
+  const row = use.closest('.found');
+  if (row?.dataset.address) useMonitor(row.dataset.address, row.dataset.name ?? '');
+});
+
+/// 設定の「心拍計」をその 1 台にして、すぐに繋ぎ替えてもらう（値は C# が組む）。断られたら・届かなければ「接続」に戻す。
+function useMonitor(address, name) {
+  connecting = { address, until: Date.now() + CONNECT_PATIENCE };
+  renderDevices(shownMonitors);
+
+  spoitable.call('useMonitor', { address, name })
+    .then(answer => { if (!answer?.accepted) stopConnecting(address); })
+    .catch(err => {
+      console.error('心拍計を切り替えられなかった', err);
+      stopConnecting(address);
+    });
+}
+
+function stopConnecting(address) {
+  if (connecting?.address !== address) return;
+
+  connecting = null;
+  renderDevices(shownMonitors);
 }
 
 /// 最後に見た時刻を「たった今」「2 分前」の形に。数えるのは手元の時計（C# と同じ PC の時計）。読めなければ空。
