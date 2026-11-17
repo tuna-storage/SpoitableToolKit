@@ -30,6 +30,9 @@ internal sealed class BleSightings
 
     private IEnumerable<Entry> Ordered() => _devices.Values.OrderBy(entry => entry.Order);
 
+    /// <summary>その心拍計の広告を最後に受けた時刻。見ていなければ null。</summary>
+    public DateTimeOffset? LastSeen(ulong address) => _devices.TryGetValue(address, out var entry) ? entry.Seen.LastSeen : null;
+
     /// <summary>
     /// 心拍サービスを名乗る広告を 1 通受けた。返す <see cref="Sighting"/> は<b>名前の変わり目だけ</b>を見る（ログに書くかどうか）—
     /// 電波の強さと時刻は毎回変わるので、そこで「変わった」とは言わない。

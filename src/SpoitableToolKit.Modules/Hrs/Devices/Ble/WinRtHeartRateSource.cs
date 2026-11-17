@@ -174,6 +174,17 @@ internal sealed class WinRtHeartRateSource(HrsConfig config, ILogger logger, Tim
                     await ReleaseAsync("the advertisements went quiet").ConfigureAwait(false);
                 }
 
+                // 線が落ちたまま Windows が繋ぎ直さず、心拍計の広告がまた見えている。手放して、下でこの周回のうちに繋ぎ直す
+                // （掴んだままだと周回は探しに行かないので、止まったままになる）。
+                if (LinkToTakeOver() is { } stale)
+                {
+                    // ReleaseAsync は、線が落ちている間（Connected が null）は理由を書かないので、ここで書く。
+                    logger.LogInformation(
+                        "GATT: the link to {Name} has been down for {Seconds:0}s and it is advertising again; letting go to connect again",
+                        stale.Monitor.Name, stale.DownFor.TotalSeconds);
+                    await ReleaseAsync(null).ConfigureAwait(false);
+                }
+
                 if (_measurement is null && _broadcasting is null)
                 {
                     if (FindTarget(selector) is { } target)
@@ -369,6 +380,29 @@ internal sealed class WinRtHeartRateSource(HrsConfig config, ILogger logger, Tim
 
     private MonitorIdentity? FindTarget(DeviceSelector selector) => PickTarget(_discovery.All, selector, Volatile.Read(ref _heldOff));
 
+    /// <summary>
+    /// 掴んだまま線が落ちていて、手放して繋ぎ直す相手（<see cref="LinkTakeover"/>）。無ければ null。
+    /// 線の様子は後片付けと同じロックの中で読む（知らせは BLE のスレッドから来る）。
+    /// </summary>
+    private StaleLink? LinkToTakeOver()
+    {
+        MonitorIdentity? held;
+        DateTimeOffset? downSince;
+
+        lock (_teardown)
+        {
+            held = _link.Held;
+            downSince = _link.DownSince;
+        }
+
+        if (held is not { } monitor || downSince is not { } down) return null;
+
+        var now = _time.GetUtcNow();
+        return LinkTakeover.ShouldTakeOver(now, down, _discovery.LastSeen(monitor.Address), IsHeld(monitor.Address))
+            ? new StaleLink(monitor, now - down)
+            : null;
+    }
+
     /// <summary>見えている心拍計から、繋ぐ相手を選ぶ。<b>手で切った相手（<paramref name="heldOff"/> のアドレス）は選ばない</b>。試験から叩けるように分けてある。</summary>
     internal static MonitorIdentity? PickTarget(IReadOnlyList<MonitorIdentity> sightings, DeviceSelector selector, IReadOnlyCollection<ulong> heldOff)
     {
@@ -535,7 +569,7 @@ internal sealed class WinRtHeartRateSource(HrsConfig config, ILogger logger, Tim
             // 線は上がっているのに落ちたまま残る。
             status = device.ConnectionStatus;
             name = _link.Held?.Name ?? BleSightings.Clean(device.Name ?? "");
-            change = _link.Feed(status == BluetoothConnectionStatus.Connected);
+            change = _link.Feed(status == BluetoothConnectionStatus.Connected, _time.GetUtcNow());
 
             if (change != LinkChange.None)
             {

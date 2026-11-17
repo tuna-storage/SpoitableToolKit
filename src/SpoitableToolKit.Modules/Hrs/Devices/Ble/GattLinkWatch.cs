@@ -23,6 +23,12 @@ internal sealed class GattLinkWatch
     public MonitorIdentity? Connected => _down ? null : Held;
 
     /// <summary>
+    /// 掴んでいる相手の線が落ちた時刻（落ちたままの間だけ。戻った・手放した・掴み直したら null）。
+    /// Windows の繋ぎ直しを待ちきれないときに、アプリから繋ぎ直すかの判断に使う（<see cref="LinkTakeover"/>）。
+    /// </summary>
+    public DateTimeOffset? DownSince { get; private set; }
+
+    /// <summary>
     /// 通知を受け始めた。<b>ここから先の上がり下がりだけ</b>が繋がりを変える —
     /// 繋ぎに行っている途中にも「上がった」は来るが、まだ心拍を受ける用意ができていない。
     /// </summary>
@@ -30,16 +36,23 @@ internal sealed class GattLinkWatch
     {
         Held = target;
         _down = false;
+        DownSince = null;
     }
 
     /// <summary>手放した。このあと遅れて届いた知らせで、繋がりを生き返らせない。</summary>
-    public void Drop() => Held = null;
+    public void Drop()
+    {
+        Held = null;
+        DownSince = null;
+    }
 
-    public LinkChange Feed(bool up)
+    /// <param name="at">知らせを受けた時刻（落ちたなら、ここから数える）。</param>
+    public LinkChange Feed(bool up, DateTimeOffset at)
     {
         if (Held is null || up != _down) return LinkChange.None;
 
         _down = !up;
+        DownSince = up ? null : at;
         return up ? LinkChange.Back : LinkChange.Lost;
     }
 }

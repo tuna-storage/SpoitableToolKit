@@ -249,11 +249,11 @@ public sealed class HrsLogTests
         watch.Hold(Sense);
         Assert.Equal(Sense, watch.Connected);
 
-        Assert.Equal(LinkChange.Lost, watch.Feed(up: false));
+        Assert.Equal(LinkChange.Lost, watch.Feed(up: false, At));
         Assert.Null(watch.Connected);
         Assert.Equal(Sense, watch.Held);
 
-        Assert.Equal(LinkChange.Back, watch.Feed(up: true));
+        Assert.Equal(LinkChange.Back, watch.Feed(up: true, At));
         Assert.Equal(Sense, watch.Connected);
     }
 
@@ -264,14 +264,14 @@ public sealed class HrsLogTests
         var watch = new GattLinkWatch();
         watch.Hold(Sense);
 
-        Assert.Equal(LinkChange.None, watch.Feed(up: true));
+        Assert.Equal(LinkChange.None, watch.Feed(up: true, At));
 
-        Assert.Equal(LinkChange.Lost, watch.Feed(up: false));
-        Assert.Equal(LinkChange.None, watch.Feed(up: false));
+        Assert.Equal(LinkChange.Lost, watch.Feed(up: false, At));
+        Assert.Equal(LinkChange.None, watch.Feed(up: false, At));
         Assert.Null(watch.Connected);
 
-        Assert.Equal(LinkChange.Back, watch.Feed(up: true));
-        Assert.Equal(LinkChange.None, watch.Feed(up: true));
+        Assert.Equal(LinkChange.Back, watch.Feed(up: true, At));
+        Assert.Equal(LinkChange.None, watch.Feed(up: true, At));
         Assert.Equal(Sense, watch.Connected);
     }
 
@@ -284,8 +284,8 @@ public sealed class HrsLogTests
     {
         var watch = new GattLinkWatch();
 
-        Assert.Equal(LinkChange.None, watch.Feed(up: true));
-        Assert.Equal(LinkChange.None, watch.Feed(up: false));
+        Assert.Equal(LinkChange.None, watch.Feed(up: true, At));
+        Assert.Equal(LinkChange.None, watch.Feed(up: false, At));
         Assert.Null(watch.Connected);
         Assert.Null(watch.Held);
     }
@@ -295,13 +295,66 @@ public sealed class HrsLogTests
     {
         var watch = new GattLinkWatch();
         watch.Hold(Sense);
-        watch.Feed(up: false);
+        watch.Feed(up: false, At);
 
         watch.Drop();
 
-        Assert.Equal(LinkChange.None, watch.Feed(up: true));
+        Assert.Equal(LinkChange.None, watch.Feed(up: true, At));
         Assert.Null(watch.Connected);
         Assert.Null(watch.Held);
+    }
+
+    /// <summary>
+    /// 線が落ちた時刻を覚え、戻ったら・手放したら・掴み直したら忘れる。忘れないと、手放して繋ぎ直したあとに古い時刻で
+    /// 「戻らない」と判断して、繋がったばかりの相手をまた手放す。
+    /// </summary>
+    [Fact]
+    public void TheTimeTheLinkWentDownIsKeptOnlyWhileItIsDown()
+    {
+        var watch = new GattLinkWatch();
+        watch.Hold(Sense);
+        Assert.Null(watch.DownSince);
+
+        watch.Feed(up: false, At);
+        Assert.Equal(At, watch.DownSince);
+
+        // 落ちたままの知らせがまた来ても、落ちた時刻は最初のまま。
+        watch.Feed(up: false, At.AddSeconds(3));
+        Assert.Equal(At, watch.DownSince);
+
+        watch.Feed(up: true, At.AddSeconds(5));
+        Assert.Null(watch.DownSince);
+
+        watch.Feed(up: false, At.AddSeconds(6));
+        watch.Drop();
+        Assert.Null(watch.DownSince);
+
+        watch.Hold(Sense);
+        watch.Feed(up: false, At.AddSeconds(7));
+        watch.Hold(Sense);
+        Assert.Null(watch.DownSince);
+    }
+
+    /// <summary>
+    /// 線が落ちたまま Windows が繋ぎ直さないとき、手放してアプリから繋ぎ直すのは、落ちてから 10 秒経っても戻らず、
+    /// その心拍計の広告が落ちたあとに、しかも最近見えたときだけ。広告が見えないうち・古い広告だけ・手で切った心拍計は手放さない。
+    /// 時刻は落ちた瞬間からの秒数で渡す（-1 = 無し）。
+    /// </summary>
+    [Theory]
+    [InlineData(-1, 30, 29, false, false)]  // 線は落ちていない（戻った）
+    [InlineData(0, 9, 8, false, false)]     // 落ちて 9 秒。まだ Windows を待つ
+    [InlineData(0, 10, 9, false, true)]     // 落ちて 10 秒、広告がいま見えている → 手放して繋ぎ直す
+    [InlineData(0, 10, -1, false, false)]   // 広告を見ていない → 待つ（居ない相手に GATT を開きに行かない）
+    [InlineData(0, 10, 0, false, false)]    // 最後の広告は落ちた瞬間（落ちたあとには見えていない）→ 待つ
+    [InlineData(0, 60, 5, false, false)]    // 落ちたあとに見えたが 55 秒前の 1 通だけ → 待つ
+    [InlineData(0, 30, 20, false, true)]    // 10 秒前に見えた → 手放す
+    [InlineData(0, 30, 29, true, false)]    // 手で切った心拍計 → 何もしない
+    public void ALinkThatStaysDownIsTakenOverOnlyWhenTheMonitorIsAdvertisingAgain(
+        int downAt, int now, int seenAt, bool byHand, bool takeOver)
+    {
+        DateTimeOffset? Moment(int seconds) => seconds < 0 ? null : At.AddSeconds(seconds);
+
+        Assert.Equal(takeOver, LinkTakeover.ShouldTakeOver(At.AddSeconds(now), Moment(downAt), Moment(seenAt), byHand));
     }
 
     [Fact]
@@ -309,13 +362,13 @@ public sealed class HrsLogTests
     {
         var watch = new GattLinkWatch();
         watch.Hold(Sense);
-        watch.Feed(up: false);
+        watch.Feed(up: false, At);
         watch.Drop();
 
         watch.Hold(Sense);
 
         Assert.Equal(Sense, watch.Connected);
-        Assert.Equal(LinkChange.Lost, watch.Feed(up: false));
+        Assert.Equal(LinkChange.Lost, watch.Feed(up: false, At));
     }
 
     [Fact]
