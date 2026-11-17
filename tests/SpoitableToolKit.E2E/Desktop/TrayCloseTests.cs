@@ -39,8 +39,8 @@ public sealed class TrayCloseTests(AppFixture app) : IClassFixture<AppFixture>
         await Page.Locator("#winClose").ClickAsync();
 
         await Assertions.Expect(Modal).ToBeVisibleAsync();
-        await Assertions.Expect(Modal.Locator("#closeTitle")).ToHaveTextAsync("ウィンドウを閉じたときの動作");
-        await Assertions.Expect(Modal).ToContainTextAsync("あとで設定の「起動と終了」から変えられます");
+        await Assertions.Expect(Modal.Locator("#closeTitle")).ToHaveTextAsync("タスクトレイに最小化しますか?");
+        await Assertions.Expect(Modal).ToContainTextAsync("設定画面から動作を変更できます");
         await Assertions.Expect(Page.Locator("#closeTray")).ToBeFocusedAsync();
 
         await Page.Locator("#closeTray").ClickAsync();
