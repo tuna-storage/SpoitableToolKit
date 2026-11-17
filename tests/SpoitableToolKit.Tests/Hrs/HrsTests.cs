@@ -278,13 +278,19 @@ public sealed class HrsTests
             _sink?.LinkChanged(this);
         }
 
+        /// <summary>偽なら、周回を始めても繋がらない（心拍計が近くに無い人）。</summary>
+        public bool ConnectsWhenRun { get; init; } = true;
+
         public async Task RunAsync(DeviceSelector selector, CancellationToken cancellationToken)
         {
             Runs++;
             Watching = true;
-            Connected = Discovered[0];
-            _sink?.LinkChanged(this);
-            _sink?.Beat(this, 72);
+            if (ConnectsWhenRun)
+            {
+                Connected = Discovered[0];
+                _sink?.LinkChanged(this);
+                _sink?.Beat(this, 72);
+            }
 
             try
             {
@@ -305,9 +311,9 @@ public sealed class HrsTests
 
     /// <param name="configure">OnInit の前に設定へ書く。ホストは保存済みの値を読み込んでから OnInit を呼ぶので、「設定ファイルにこう入っていた」状態はここで作る。</param>
     private static (HrsModule Module, FakeModuleHost Host, FakeSource Source) NewModule(
-        Action<HrsConfig>? configure = null, Logs? logs = null)
+        Action<HrsConfig>? configure = null, Logs? logs = null, FakeSource? fake = null)
     {
-        var source = new FakeSource();
+        var source = fake ?? new FakeSource();
         var module = new HrsModule { CreateSources = () => [source] };
         var host = (logs is null ? new FakeModuleHost() : FakeModuleHost.LoggingTo(logs)).WithConfig("hrs", module.Config!);
 
@@ -358,6 +364,42 @@ public sealed class HrsTests
             source.Beat(80);
             Assert.Equal("80 bpm", host.Ui.Status.Text);
             Assert.Equal(StatusState.Ok, host.Ui.Status.State);
+        }
+        finally
+        {
+            module.OnShutdown();
+        }
+    }
+
+    /// <summary>
+    /// 心拍計と繋がっていないときの札は、言語に関係なく「N/A bpm」（サイドバー・ダッシュボードの札・手首の帯は狭く、言葉で書くと切れる）。
+    /// 繋がる前（起動したまま心拍計が近くに無い）も、切れたあとも同じ。試験の辞書はキーをそのまま返すので、辞書を引いていればキーが出る。
+    /// </summary>
+    [Fact]
+    public async Task TheStatusSaysNotAvailableWhenNoMonitorIsConnected()
+    {
+        var (idle, idleHost, _) = NewModule(fake: new FakeSource { ConnectsWhenRun = false });
+        try
+        {
+            Assert.Equal("N/A bpm", idleHost.Ui.Status!.Text);
+            Assert.Equal(StatusState.Off, idleHost.Ui.Status.State);
+        }
+        finally
+        {
+            idle.OnShutdown();
+        }
+
+        var (module, host, source) = NewModule();
+        try
+        {
+            await WaitFor(() => host.Ui.Status!.Text == "72 bpm");
+
+            source.Drop();
+
+            // 札を書き直すのは、ループが次の 1 手を打つとき（心拍 72 なら 1 秒弱）。
+            await WaitFor(() => host.Ui.Status!.Text != "72 bpm");
+            Assert.Equal("N/A bpm", host.Ui.Status!.Text);
+            Assert.Equal(StatusState.Off, host.Ui.Status.State);
         }
         finally
         {

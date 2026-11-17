@@ -131,7 +131,7 @@ public sealed class HrsModule : ISpoitableModule, IConfigEventListener<HrsConfig
 
         // サイドバーに出す初期値。**繋がる前から居る**ので、心拍計が無い人にも「まだ繋がっていない」が見える。
         // 押すとこの画面が開く（ホストが決める）。
-        _status.Text = host.Text["hrs.status.off"];
+        _status.Text = HeartRateAnnouncer.NotConnected;
 
         // 設定ファイルを直接書き換えられていたら、読めないパラメータ名をここで既定へ戻す
         // （設定画面から来るものは OnConfigChanging で断っている）。

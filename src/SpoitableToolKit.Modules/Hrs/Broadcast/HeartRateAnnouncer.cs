@@ -18,13 +18,19 @@ internal sealed class HeartRateAnnouncer(
     Func<HrsBroadcastServer?> broadcast,
     Func<HeartRateManager?> source)
 {
+    /// <summary>
+    /// 心拍計と繋がっていないときの札の字。言語に関係なくこの字（サイドバー・ダッシュボードの札・手首の帯は狭く、言葉で書くと切れる）。
+    /// 繋がっているのに計れていない（0 が来た）ときの「— bpm」とは別。
+    /// </summary>
+    public const string NotConnected = "N/A bpm";
+
     /// <summary>配信へ 1 通。止まったときこそ送る（送らないとオーバーレイが固まる）。</summary>
     public void Broadcast(int bpm, bool connected)
     {
         // 配信が止まっていてもサイドバーには出したいので、配信より先に書く。
         // 0 は「繋がっているが計れていない」（着けていない）。前の数字を残すと今も計れているように見える。
         var stats = log.Overall;
-        status.Text = !connected ? host()?.Text["hrs.status.off"] ?? "—" : bpm > 0 ? $"{bpm} bpm" : "— bpm";
+        status.Text = !connected ? NotConnected : bpm > 0 ? $"{bpm} bpm" : "— bpm";
         status.State = connected && bpm > 0 ? StatusState.Ok : StatusState.Off;
         ShowStats(stats);
 

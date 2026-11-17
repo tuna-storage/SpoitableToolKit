@@ -148,7 +148,6 @@
   "hrs.error.paramName": "The parameter name ({0}) {1}",
   "hrs.error.paramName.empty": "cannot be empty",
   "hrs.error.paramName.slash": "cannot start or end with /, or contain //",
-  "hrs.status.off": "Not connected",
   "hrs.status.note": "Min {0} / Max {1}",
   "hrs.name": "Heart rate",
   "hrs.shortcut.live": "Heart rate graph"

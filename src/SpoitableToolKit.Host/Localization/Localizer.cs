@@ -127,7 +127,7 @@ internal sealed class Localizer(ILogger<Localizer> logger) : ILocalizer
     /// 1 つの辞書を<b>足す</b>（今の言語で。読み直しはしない）。
     /// <para>
     /// モジュールの <c>OnInit</c> より前に呼ぶ。モジュールの辞書をまとめて読むのは全部を読み込んだ後なので、
-    /// それまでに引いた文言（心拍の「未接続」など）が<b>キーのまま</b>状態の口に残る。
+    /// 呼ばないと、それまでに引いた文言（<c>OnInit</c> で状態の口に書いた字など）が<b>キーのまま</b>残る。
     /// </para>
     /// </summary>
     public void Merge(LocaleSource source) => LoadFrom(source, _strings);

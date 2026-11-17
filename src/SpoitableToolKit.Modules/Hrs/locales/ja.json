@@ -148,7 +148,6 @@
   "hrs.error.paramName": "パラメータ名 ({0}) は{1}",
   "hrs.error.paramName.empty": "空にできません",
   "hrs.error.paramName.slash": "先頭と末尾に / を置けず、// も含められません",
-  "hrs.status.off": "未接続",
   "hrs.status.note": "最小 {0} / 最大 {1}",
   "hrs.name": "心拍",
   "hrs.shortcut.live": "心拍のグラフ"
