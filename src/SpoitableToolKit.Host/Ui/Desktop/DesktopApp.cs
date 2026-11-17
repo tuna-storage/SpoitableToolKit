@@ -119,8 +119,9 @@ internal sealed class DesktopApp : ApplicationContext, IHostWindow
                 Open();
                 break;
 
+            // 押された項目の処理が終わってから畳む。その場で畳むと、まだ押された後始末をしているメニューごとアイコンを捨てることになる。
             case TrayMenu.Exit:
-                ExitNow();
+                Exit();
                 break;
         }
     }
