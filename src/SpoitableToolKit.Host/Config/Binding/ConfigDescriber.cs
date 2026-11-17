@@ -4,6 +4,7 @@ using SpoitableToolKit.Abstractions.Config;
 using SpoitableToolKit.Abstractions.Config.Attributes;
 using SpoitableToolKit.Abstractions.Localization;
 using SpoitableToolKit.Host.Config.Actions;
+using SpoitableToolKit.Host.Config.Interfaces;
 using SpoitableToolKit.Host.Config.Models;
 using SpoitableToolKit.Host.Ui.Push;
 
@@ -21,10 +22,11 @@ internal sealed class ConfigDescriber(
     /// 出す / 出さないは C# が計算して <c>shown</c> で渡す。条件はモジュールが書いたふつうの式なので画面では評価できないし、
     /// 画面に条件を持たせると種別が増えるたびに 2 か所を直すことになる（<c>LogRow</c> と同じ規律）。
     /// 隠れている行も落とさずに渡す。落とすと、聞き直しのたびにその行に溜めてある変更が画面から消える。
+    /// 落とすのは属性で隠した行と、本物の設定が実行時の印で外した行（<see cref="IRuntimeHiddenSettings"/>。起動している間は変わらない）だけ。
     /// </summary>
     public object[] Describe(ILocalizer text) =>
     [
-        .. order.Where(m => !m.Hidden && !m.IsSectionSwitch).Select(object (m) => m.IsSection
+        .. order.Where(m => !m.Hidden && !m.IsSectionSwitch && !HiddenNow(m)).Select(object (m) => m.IsSection
             ? new
             {
                 key = m.Path,
@@ -111,6 +113,10 @@ internal sealed class ConfigDescriber(
             ? UiBroadcast.Json(real.View(text))
             : null,
     };
+
+    /// <summary>聞く相手は本物の設定（下見の写しを描いているときも）。写しには実行時に入れた印が付いていない。</summary>
+    private bool HiddenNow(ConfigMember member) =>
+        suggestionSource() is IRuntimeHiddenSettings runtime && runtime.IsHidden(member.NamePath);
 
     private static string? GroupOf(ConfigMember m, ILocalizer text) =>
         GroupKeyOf(m) is { } key ? text[key] : null;

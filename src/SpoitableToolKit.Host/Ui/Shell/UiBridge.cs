@@ -39,9 +39,9 @@ namespace SpoitableToolKit.Host.Ui.Shell;
 /// </summary>
 internal sealed class UiBridge(
     IVrcLogBus logBus, SqliteVrcLogStore store, HostConfig hostConfig, ModuleManager modules, NotificationManager notify,
-    ModuleConfigStore configs, UiBroadcast broadcast, Localizer localizer, StatusBoard status,
+    ModuleConfigStore configs, Localizer localizer, StatusBoard status,
     AppLogSink appLog, UiToken uiToken, ContextMenus menus, ShortcutBoard shortcuts, ModuleCatalog catalog, ModuleInstallJobs jobs,
-    ILogger logger)
+    SettingsApplier applier, ILogger logger)
 {
     /// <summary>一度に読み戻す上限。500 では足りない — 記録の 92% が <c>ApiRequest</c>（既定で畳む種別）なので、500 行取っても見える行は 10 件ほどしか無く、半日ぶんも遡れない。</summary>
     private const int MaxQueryRows = 5000;
@@ -295,7 +295,7 @@ internal sealed class UiBridge(
 
                 try
                 {
-                    configs.Apply(module, changes, localizer);
+                    applier.Apply(module, changes);
                 }
                 catch (ConfigRejectedException ex)
                 {
@@ -318,16 +318,10 @@ internal sealed class UiBridge(
             Collect(null, [new ConfigNote(null, ex.Message)]);
         }
 
-        // 言語が変わったら辞書を読み直す。画面はこのあと configChanged で組み直すので、ここで入れ替えておけば、そのまま新しい言語で描かれる。
-        var languageChanged = hostConfig.Language != language;
-        if (languageChanged)
-            localizer.Load(hostConfig.Language.ToString(), modules.LocaleSources);
-
-        // 片方の画面だけ古い値のまま、を作らない。
-        // 言語が変わったかどうかを伝える。画面はこれを見て、パネルを読み込み直すかを決める。
+        // 言語が変わったら辞書を読み直してから、全部の面へ流す（片方の画面だけ古い値のまま、を作らない）。
         // 読み込み直しは前の読み込み中だと無視されるので、保存のたびに全パネルを読み込み直すと、続けて保存したときパネルがテーマの当たっていない途中の状態で取り残される。
         // テーマは張り直しの道で追いつくので、読み込み直しは言語のときだけでよい。
-        broadcast.Push("configChanged", new { language = languageChanged });
+        applier.Announce(language);
 
         // 「サイドバーに出さない状態」を変えたときは、並ぶ中身が変わるので、次の周（StatusBoard.Flush）で配られる。
 
@@ -554,6 +548,26 @@ internal sealed class UiBridge(
         Authorize(token);
 
         Window?.CloseWindow();
+    }
+
+    /// <summary>
+    /// 閉じるときの問い（閉じるボタンの動きを決めていないときに出る）の答え。<c>tray</c> か <c>exit</c>。答えを設定に書いてから、その動きをする。
+    /// ほかの字は何もしない（false）。問いを閉じただけ（Esc・外を押した）なら、画面はこれを呼ばない（設定は聞くのまま）。
+    /// </summary>
+    public bool AnswerClose(string token, string choice)
+    {
+        Authorize(token);
+
+        CloseButtonAction? chosen = choice switch
+        {
+            "tray" => CloseButtonAction.Tray,
+            "exit" => CloseButtonAction.Exit,
+            _ => null,
+        };
+        if (chosen is not { } action || Window is not { } window) return false;
+
+        window.AnswerClose(action);
+        return true;
     }
 
     /// <summary>管理画面の「再起動」。窓口が出来てから挿す（<see cref="Window"/> と同じ）。</summary>

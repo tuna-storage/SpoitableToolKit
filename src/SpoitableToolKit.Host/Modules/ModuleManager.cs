@@ -241,7 +241,7 @@ internal sealed class ModuleManager(
         if (instance.Config is null) return;
 
         configs.Save(instance.Id);
-        broadcast.Push("configChanged", new { language = false });
+        broadcast.Push(ConfigChangedPush.Channel, new ConfigChangedPush(Language: false));
     }
 
     /// <summary>

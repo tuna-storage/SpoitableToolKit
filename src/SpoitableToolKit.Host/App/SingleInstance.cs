@@ -16,7 +16,7 @@ namespace SpoitableToolKit.Host.App;
 /// </para>
 /// <para>
 /// 知らせは置き場ごとの名前付きの印（<see cref="ShowRequests"/>）。立てた印は、1 つ目が受け取るまで立ったまま残るので、
-/// 1 つ目の窓がまだできていない間（起動の数秒）に来た知らせも、窓ができてから受け取れる。
+/// 1 つ目がまだ待ち始めていない間（起動の数秒）に来た知らせも、待ち始めてから受け取れる。
 /// </para>
 /// <para>
 /// 起動の頭で取り、アプリの最後（記録を書き切ったあと）で離す。「再起動」で立った新しいアプリは、前のアプリが離すまで待つ
@@ -44,7 +44,7 @@ internal sealed class SingleInstance : IDisposable
 
     /// <summary>
     /// 2 つ目に起動されたアプリが「前に出て」と言ったら立つ印（受け取ると自分で戻る）。受け取るまで立ったまま残る。
-    /// 窓（<see cref="SpoitableToolKit.Host.Ui.Desktop.DesktopWindow"/>）が待つ。
+    /// デスクトップの側（<see cref="SpoitableToolKit.Host.Ui.Desktop.DesktopApp"/>）が待つ。窓をトレイにしまっていれば、作って開く。
     /// </summary>
     public WaitHandle ShowRequests => _showRequests;
 

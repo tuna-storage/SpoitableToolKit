@@ -1,6 +1,7 @@
 using System.Reflection;
 using SpoitableToolKit.Abstractions.Config.Attributes;
 using SpoitableToolKit.Host.Settings;
+using SpoitableToolKit.Tests.Fakes;
 using Xunit;
 
 namespace SpoitableToolKit.Tests.Settings;
@@ -41,6 +42,43 @@ public sealed class HostConfigTests
         Assert.True(config.CheckAppUpdates);
         Assert.Equal("", config.SkippedAppVersion);
         Assert.False(config.UpdateChannelChosen);
+    }
+
+    /// <summary>閉じるボタンは初めて押したときに聞く。起動はふつうに窓を開き、Windows の起動時には起動しない（選んだ人だけ）。</summary>
+    [Fact]
+    public void TheStartupAndExitSettingsStartFromAskingAndOff()
+    {
+        var config = new HostConfig();
+
+        Assert.Equal(CloseButtonAction.Ask, config.CloseButton);
+        Assert.False(config.StartInTray);
+        Assert.False(config.StartWithWindows);
+    }
+
+    private static string[] Rows(HostConfig config, System.Text.Json.Nodes.JsonObject? pending = null)
+    {
+        var binding = new SpoitableToolKit.Host.Config.ModuleConfigBinding(config, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+        var items = pending is null ? binding.Describe(new FakeLocalizer()) : binding.DescribeWith(pending, new FakeLocalizer());
+        return [.. items.Select(item => item.GetType().GetProperty("name")!.GetValue(item)!.ToString()!)];
+    }
+
+    /// <summary>
+    /// Windows の起動時の起動は、登録できる形（インストール版）でだけ行を出す。開発の bin では出さない（押しても登録しないので、押せる行を見せない）。
+    /// 下見（ほかの値を打っている途中）でも同じ — 下見は写しで描くが、出すかは本物に聞く（写しには実行時の印が付かない）。
+    /// </summary>
+    [Fact]
+    public void TheStartWithWindowsRowIsShownOnlyWhereItCanBeRegistered()
+    {
+        var pending = new System.Text.Json.Nodes.JsonObject { [nameof(HostConfig.StartInTray)] = true };
+
+        var unavailable = new HostConfig();
+        Assert.DoesNotContain(nameof(HostConfig.StartWithWindows), Rows(unavailable));
+        Assert.DoesNotContain(nameof(HostConfig.StartWithWindows), Rows(unavailable, pending));
+        Assert.Contains(nameof(HostConfig.StartInTray), Rows(unavailable));
+
+        var available = new HostConfig { StartWithWindowsAvailable = () => true };
+        Assert.Contains(nameof(HostConfig.StartWithWindows), Rows(available));
+        Assert.Contains(nameof(HostConfig.StartWithWindows), Rows(available, pending));
     }
 
     /// <summary>画面が自分で持つ状態は設定画面に並べない。属性を落としても普通に動き、項目が 1 つ増えるだけ（翻訳が無いのでキーがそのまま出る）なので、ここで止める。</summary>

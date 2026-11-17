@@ -46,7 +46,7 @@ public sealed class SettingsPagesTests(AppFixture app) : IClassFixture<AppFixtur
         Assert.Equal(
             [
                 "― 本体",
-                "host:display 画面", "host:log ログ", "host:notify 通知", "host:osc OSC", "host:vr VR / 手首",
+                "host:display 画面", "host:startup 起動と終了", "host:log ログ", "host:notify 通知", "host:osc OSC", "host:vr VR / 手首",
                 "host:modules モジュール管理", "host:updates アプリの更新",
                 "― モジュール",
                 "hrs 心拍", "videourl 動画 URL",

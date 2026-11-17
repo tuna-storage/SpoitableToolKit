@@ -29,7 +29,7 @@ public class AppFixture : IAsyncLifetime
     /// <summary>
     /// 設定の画面を開いて、左の一覧からページを選ぶ。ページは画面を離れても覚えているので、開くだけだと前の試験が開いたページのままになる。
     /// </summary>
-    /// <param name="page">本体のカテゴリ（<c>display</c>・<c>log</c>・<c>notify</c>・<c>osc</c>・<c>vr</c>・<c>modules</c>・<c>updates</c>）かモジュールの Id。</param>
+    /// <param name="page">本体のカテゴリ（<c>display</c>・<c>startup</c>・<c>log</c>・<c>notify</c>・<c>osc</c>・<c>vr</c>・<c>modules</c>・<c>updates</c>）かモジュールの Id。</param>
     public async Task OpenSettings(string page = "display")
     {
         await Page.Locator("#sidebar .item[data-id='settings']").ClickAsync();
@@ -254,7 +254,7 @@ public class AppFixture : IAsyncLifetime
         await StartAsync();
     }
 
-    /// <summary>kill で落とすので、まだキューに居るものは消える。残したいものは記録に入ったのを確かめてから呼ぶ。</summary>
+    /// <summary>kill で落とすので、まだキューに居るものは消える。残したいものは記録に入ったのを確かめてから呼ぶ。アプリが自分で終わったあと（終了を試す試験）に呼んでもよい。</summary>
     public async Task RestartAsync()
     {
         await StopAsync();
@@ -326,6 +326,7 @@ public class AppFixture : IAsyncLifetime
         startInfo.Environment["SPOITABLE_DOTNET_RELEASES"] = GitHub.DotnetReleases;
 
         foreach (var (name, value) in ExtraEnvironment) startInfo.Environment[name] = value;
+        foreach (var argument in Arguments) startInfo.ArgumentList.Add(argument);
 
         _process = Process.Start(startInfo)
                    ?? throw new InvalidOperationException($"起動できなかった: {executable}");
@@ -341,7 +342,25 @@ public class AppFixture : IAsyncLifetime
         await WaitForCdpAsync(endpoint);
 
         _playwright = await Playwright.CreateAsync();
-        Page = await ConnectToTheShellAsync(endpoint);
+
+        // しまった状態で始まるアプリは、窓（ページ）が無い。始まりきったところで数えてから、2 つ目の起動で開かせる（製品の道を通す）。
+        if (StartsInTray)
+        {
+            await WaitForOutputAsync("Starting in the tray");
+            await WaitForLogTailAsync();
+            PagesWhileInTray = await PageTargetsAsync();
+            await AskToShowAsync();
+        }
+
+        await ConnectAsync();
+
+        await WaitForLogTailAsync();
+    }
+
+    /// <summary>シェルのページへ繋ぎ、bind が済むのを待つ（起動と、窓を作り直したあと）。</summary>
+    private async Task ConnectAsync()
+    {
+        Page = await ConnectToTheShellAsync(CdpEndpoint);
 
         // ページのロードだけでは JS ブリッジの bind が済んだ保証がない。
         await Page.WaitForFunctionAsync("() => window.__stkReady === true", null,
@@ -349,8 +368,81 @@ public class AppFixture : IAsyncLifetime
 
         // Playwright は CDP に繋ぐと自前の色スキーム（既定 light）を当て、アプリが DevTools で指定したダークを打ち消すので合わせる。
         await Page.EmulateMediaAsync(new PageEmulateMediaOptions { ColorScheme = ColorScheme.Dark });
+    }
 
-        await WaitForLogTailAsync();
+    /// <summary>起動の引数（Windows の起動時の起動の <c>--tray</c> など）。</summary>
+    protected virtual IReadOnlyList<string> Arguments => [];
+
+    /// <summary>窓を開かずに始まるアプリか（<c>--tray</c>・設定）。真なら、始まりきったところでページを数え（<see cref="PagesWhileInTray"/>）、2 つ目の起動で窓を開かせてから繋ぐ。</summary>
+    protected virtual bool StartsInTray => false;
+
+    /// <summary>しまった状態で始まりきったときの、CDP のページの数（<see cref="StartsInTray"/> のときだけ）。</summary>
+    public int PagesWhileInTray { get; private set; } = -1;
+
+    /// <summary>CDP に見えているページ（窓の browser）の数。トレイにしまっている間は 0（e2e は VR を出さないので、ほかの browser も無い）。</summary>
+    public async Task<int> PageTargetsAsync()
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        var list = System.Text.Json.Nodes.JsonNode.Parse(await http.GetStringAsync($"{CdpEndpoint}/json/list"))?.AsArray() ?? [];
+        return list.Count(target => target?["type"]?.GetValue<string>() == "page");
+    }
+
+    /// <summary>窓がしまわれる（browser が落ちる）のを待つ。</summary>
+    public async Task WaitUntilTheWindowIsGoneAsync()
+    {
+        for (var attempt = 0; attempt < 60; attempt++)
+        {
+            if (await PageTargetsAsync() == 0) return;
+            await Task.Delay(250);
+        }
+
+        throw new TimeoutException("窓がしまわれなかった（CDP にページが残っている）");
+    }
+
+    /// <summary>
+    /// しまった窓を開く。トレイのアイコンは Playwright から押せないので、同じ置き場で 2 つ目を起動して本物の「前に出て」を飛ばす（製品の道）。
+    /// 窓を作り直すと CDP のページが替わるので、繋ぎ直す（<see cref="Page"/> が新しいページになる）。
+    /// </summary>
+    public async Task OpenTheWindowFromTheTrayAsync()
+    {
+        await AskToShowAsync();
+
+        if (_browser is not null) await _browser.CloseAsync();
+        _browser = null;
+        await ConnectAsync();
+    }
+
+    private async Task AskToShowAsync()
+    {
+        using var second = StartAnotherWithTheSameDataFolder();
+        try
+        {
+            if (!await Task.Run(() => second.WaitForExit(30_000))) throw new TimeoutException("2 つ目のアプリが終わらなかった");
+            if (second.ExitCode != 3) throw new InvalidOperationException($"2 つ目のアプリが「もう動いている」で終わらなかった（終了コード {second.ExitCode}）");
+        }
+        finally
+        {
+            if (!second.HasExited) second.Kill(entireProcessTree: true);
+        }
+    }
+
+    /// <summary>アプリが自分で終わるのを待つ。終わったら終了コード、終わらなければ null。</summary>
+    public async Task<int?> WaitForTheAppToExitAsync(TimeSpan limit)
+    {
+        if (_process is not { } process) return null;
+        return await Task.Run(() => process.WaitForExit(limit)) ? process.ExitCode : null;
+    }
+
+    /// <summary>アプリの出力にその字の行が出るのを待つ。</summary>
+    public async Task WaitForOutputAsync(string text)
+    {
+        for (var attempt = 0; attempt < 120; attempt++)
+        {
+            if (_output.Any(line => line.Contains(text, StringComparison.Ordinal))) return;
+            await Task.Delay(250);
+        }
+
+        throw new TimeoutException($"「{text}」の行が出なかった。最後の出力:{Environment.NewLine}{string.Join(Environment.NewLine, _output.TakeLast(30))}");
     }
 
     /// <summary>tail は「いまのファイル末尾」から始まるので、掴まれる前に書いた行は読まれない。待たないと拾われたり拾われなかったりする。</summary>
@@ -397,7 +489,14 @@ public class AppFixture : IAsyncLifetime
 
     private async Task StopAsync()
     {
-        if (_browser is not null) await _browser.CloseAsync();
+        // アプリが自分で終わっていたら（終了を試す試験）、繋ぎはもう切れている。
+        try
+        {
+            if (_browser is not null) await _browser.CloseAsync();
+        }
+        catch (PlaywrightException)
+        {
+        }
         _playwright?.Dispose();
         _browser = null;
         _playwright = null;

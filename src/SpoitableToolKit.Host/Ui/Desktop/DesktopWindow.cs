@@ -1,30 +1,35 @@
 using System.Runtime.InteropServices;
 using CefSharp;
 using CefSharp.WinForms;
-using Microsoft.Extensions.Logging;
 using SpoitableToolKit.Host.Ui.Browser;
-using SpoitableToolKit.Host.Ui.Licenses;
 using SpoitableToolKit.Host.Ui.Push;
 using SpoitableToolKit.Host.Ui.Shell;
 
 namespace SpoitableToolKit.Host.Ui.Desktop;
 
-/// <summary>デスクトップ側の窓。VR オーバーレイ（OSR）とは別インスタンスの windowed CEF を使う。windowed にするのは日本語 IME・テキスト選択・右クリック・DPI を CEF 任せにできるため。窓を自動で隠したりはしない。</summary>
-internal sealed class DesktopWindow : Form, IHostWindow
+/// <summary>
+/// デスクトップ側の窓。VR オーバーレイ（OSR）とは別インスタンスの windowed CEF を使う。windowed にするのは日本語 IME・テキスト選択・右クリック・DPI を CEF 任せにできるため。
+/// トレイにしまうときは閉じて破棄する（browser ごと落とす）。開くたびに作り直すのも、閉じられかけたときに何をするかを決めるのも <see cref="DesktopApp"/>。
+/// ここのメソッドは UI のスレッドから呼ぶ（<see cref="DesktopApp"/> が渡す）。
+/// </summary>
+internal sealed class DesktopWindow : Form
 {
+    /// <summary>問いを出せたかの答えを待つ長さ。返らなければ、出せなかったものとして扱う（窓は畳む）。</summary>
+    private static readonly TimeSpan AskTimeout = TimeSpan.FromSeconds(2);
+
     private readonly ChromiumWebBrowser _browser;
     private readonly UiBroadcast _broadcast;
-    private readonly WaitHandle _showRequests;
     private readonly bool _offscreen;
-    private readonly ILogger _logger;
-    private RegisteredWaitHandle? _showWait;
 
-    /// <param name="showRequests">「前に出て」の印（<see cref="SpoitableToolKit.Host.App.SingleInstance.ShowRequests"/>。2 つ目に起動されたアプリが立てる）。窓ができてから待ち始める — それより前に立った印も、立ったまま残っているので受け取れる。</param>
-    public DesktopWindow(UiBridge bridge, UiBroadcast broadcast, WaitHandle showRequests, ILogger logger)
+    /// <summary>
+    /// 人の画面に何も出さない起動か（<c>SPOITABLE_UI_OFFSCREEN</c>。e2e・使い捨ての起動）。窓は画面の外に置き、トレイにもアイコンを出さない
+    /// （e2e は 8 つ同時にアプリを立てるので、出すと手元のトレイにアイコンが並ぶ）。
+    /// </summary>
+    public static bool OffscreenRequested => Environment.GetEnvironmentVariable("SPOITABLE_UI_OFFSCREEN") is { Length: > 0 };
+
+    public DesktopWindow(UiBridge bridge, UiBroadcast broadcast)
     {
         _broadcast = broadcast;
-        _showRequests = showRequests;
-        _logger = logger;
 
         Text = "SpoitableToolKit";
         Icon = AppIcon.Window;
@@ -38,7 +43,7 @@ internal sealed class DesktopWindow : Form, IHostWindow
 
         // e2e のときは画面の外へ置く。試験は本物の窓を実画面に出して動かすので、走っている間に人がその窓を閉じたり、フォーカスを奪ったり、触ったりすると落ちる。
         // 描画は止めない。最小化やサイズ 0 にすると windowed CEF が描くのをやめて、画面を見る試験が別の理由で落ちる。位置だけ画面の外へ動かす。
-        _offscreen = Environment.GetEnvironmentVariable("SPOITABLE_UI_OFFSCREEN") is { Length: > 0 };
+        _offscreen = OffscreenRequested;
         if (_offscreen)
         {
             StartPosition = FormStartPosition.Manual;
@@ -63,9 +68,6 @@ internal sealed class DesktopWindow : Form, IHostWindow
     {
         base.OnHandleCreated(e);
         _browser.LoadingStateChanged += OnLoadingStateChanged;
-
-        // 「前に出て」を待つ（窓のスレッドへ渡してから前に出る）。窓ができる前に立った印も、ここで受け取る。
-        _showWait ??= ThreadPool.RegisterWaitForSingleObject(_showRequests, (_, _) => AskedToShow(), null, Timeout.Infinite, executeOnlyOnce: false);
 
         // 描画が始まる前に当てたい。間に合わなければ読み込み完了時にもう一度当てる。
         _browser.IsBrowserInitializedChanged += (_, _) => _ = CefTheme.ApplyAsync(_browser);
@@ -178,16 +180,16 @@ internal sealed class DesktopWindow : Form, IHostWindow
         }
     }
 
-    /// <summary>2 つ目に起動されたアプリに頼まれて、前に出る（最小化なら戻す）。画面の外に置いている間（e2e）は前に出ない — 試験を回している間に、人が使っている窓からフォーカスを奪わない。どちらでもアプリログに 1 行残す。</summary>
-    private void ComeToFront()
-    {
-        if (_offscreen)
-        {
-            _logger.LogInformation("The app was started again with the same data folder; staying where it is (the window is off screen)");
-            return;
-        }
+    /// <summary>画面の外に置いているか（e2e・使い捨ての起動）。その間は前に出ない。</summary>
+    public bool Offscreen => _offscreen;
 
-        _logger.LogInformation("The app was started again with the same data folder; bringing this window to the front instead");
+    /// <summary>
+    /// 前に出る（最小化なら戻す）。画面の外に置いている間（e2e）は何もしない — 試験を回している間に、人が使っている窓からフォーカスを奪わない。
+    /// 2 つ目に起動されたアプリは前に出す権利を先に渡してくれる（<see cref="SpoitableToolKit.Host.App.SingleInstance.AskTheRunningOneToShow"/>）。
+    /// </summary>
+    public void ComeToFront()
+    {
+        if (_offscreen) return;
 
         // 最小化なら元の大きさへ（最大化したまま最小化していたら、最大化に戻す — WindowState = Normal だと通常の大きさになる）。
         if (WindowState == FormWindowState.Minimized) ShowWindow(Handle, SwRestore);
@@ -195,24 +197,18 @@ internal sealed class DesktopWindow : Form, IHostWindow
         SetForegroundWindow(Handle);
     }
 
-    /// <summary>印を受け取った（thread pool の上）。窓のスレッドへ渡す。閉じかけなら何もしない。</summary>
-    private void AskedToShow()
+    /// <summary>
+    /// 閉じるボタンの動きをシェルのモーダルで聞く。出せたら true（答えは <see cref="UiBridge.AnswerClose"/> で来る）。
+    /// 出せたかどうかはページに聞く — 読み込み中・起動の途中（文言をまだ持っていない）なら、ページが false を返す。答えが返らない・JS を受け取れないときも false。
+    /// 聞くのはこの窓のページだけ（VR の窓とダッシュボードも同じ broadcast にいるので、push では向こうにも出る）。
+    /// </summary>
+    public async Task<bool> AskToCloseAsync()
     {
-        try
-        {
-            if (IsHandleCreated && !IsDisposed) BeginInvoke(ComeToFront);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
-        {
-            // 閉じている最中。
-        }
-    }
+        if (!_browser.CanExecuteJavascriptInMainFrame) return false;
 
-    protected override void OnHandleDestroyed(EventArgs e)
-    {
-        _showWait?.Unregister(null);
-        _showWait = null;
-        base.OnHandleDestroyed(e);
+        var response = await _browser.EvaluateScriptAsync(
+            "window.stk && typeof window.stk.askClose === 'function' ? window.stk.askClose() : false", AskTimeout);
+        return response.Success && response.Result is true;
     }
 
     private const int SwRestore = 9;
@@ -290,11 +286,12 @@ internal sealed class DesktopWindow : Form, IHostWindow
             : bounds.Left <= monitor.Left ? TaskbarEdge.Left : TaskbarEdge.Right;
     }
 
+    /// <summary>どのスレッドから読んでもよい（状態を読むだけ）。</summary>
     public bool IsMaximized => WindowState == FormWindowState.Maximized;
 
-    public void Minimize() => BeginInvoke(() => WindowState = FormWindowState.Minimized);
+    public void Minimize() => WindowState = FormWindowState.Minimized;
 
-    public void ToggleMaximize() => BeginInvoke(() =>
+    public void ToggleMaximize()
     {
         WindowState = IsMaximized ? FormWindowState.Normal : FormWindowState.Maximized;
 
@@ -304,33 +301,13 @@ internal sealed class DesktopWindow : Form, IHostWindow
             SwpFrameChanged | SwpNoMove | SwpNoSize | SwpNoZOrder | SwpNoActivate);
 
         PerformLayout();
-    });
-
-    public void CloseWindow() => BeginInvoke(Close);
-
-    private ChromiumCreditsWindow? _credits;
-
-    /// <summary>この窓を閉じるときに一緒に閉じる（残したまま CEF を畳むと、browser が生きたまま止まる）。</summary>
-    public void OpenChromiumCredits(string title) => BeginInvoke(() =>
-    {
-        if (_credits is { IsDisposed: false } open)
-        {
-            if (open.WindowState == FormWindowState.Minimized) open.WindowState = FormWindowState.Normal;
-            open.Activate();
-            return;
-        }
-
-        var credits = new ChromiumCreditsWindow(title, _offscreen, _logger);
-        credits.FormClosed += (_, _) => _credits = null;
-        _credits = credits;
-        credits.Show(this);
-    });
+    }
 
     /// <summary>
     /// 掴んで動かす。マウスを追いかけない — 掴みを外してから「キャプションを押した」ことにして Windows へ渡すと、以降の追従は向こうがやる。
-    /// <c>ReleaseCapture</c> が要るのは、押した時点で CEF の子窓がマウスを掴んでいるため。呼び出しは CEF の別スレッドから来るので、窓のスレッドへ移してから触る。
+    /// <c>ReleaseCapture</c> が要るのは、押した時点で CEF の子窓がマウスを掴んでいるため。呼び出しは CEF の別スレッドから来るので、窓のスレッドへ移してから呼ばれる。
     /// </summary>
-    public void BeginDrag() => BeginInvoke(() =>
+    public void BeginDrag()
     {
         // もう離されていたら掴まない。呼び出しは CEF から回ってくるので、ここへ届く頃にはボタンが上がっていることがある。
         // その状態で掴むと、押していないのに窓がマウスに付いてくる（掴みっぱなしに見える）。
@@ -338,7 +315,7 @@ internal sealed class DesktopWindow : Form, IHostWindow
 
         ReleaseCapture();
         SendMessage(Handle, WmNcLButtonDown, HtCaption, IntPtr.Zero);
-    });
+    }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {

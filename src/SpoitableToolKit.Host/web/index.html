@@ -370,6 +370,27 @@
   </div>
 </div>
 
+<!-- 閉じるボタンを押したときの動きを聞く（決めていないときだけ。C# が窓の閉じかけを止めてから開かせる: window.stk.askClose）。
+     答えると設定（閉じるボタンの動き）に書いてから、しまうか終了する。Esc・外を押す・キャンセルは何もしない（窓も設定もそのまま、次にまた聞く）。
+     デスクトップの窓にだけ出る（VR の窓とダッシュボードには C# が頼まない）。 -->
+<div class="spoitable-modal" id="closeModal" hidden>
+  <div class="spoitable-dialog close-dialog" role="dialog" aria-modal="true" aria-labelledby="closeTitle">
+    <div class="spoitable-dialog-head">
+      <div class="spoitable-dialog-title"><h2 id="closeTitle" data-i18n="host.close.title"></h2></div>
+    </div>
+    <div class="spoitable-dialog-body">
+      <p class="close-lead" data-i18n="host.close.lead"></p>
+      <p class="spoitable-hint" data-i18n="host.close.note"></p>
+    </div>
+    <div class="spoitable-dialog-foot">
+      <button class="spoitable-btn spoitable-btn-ghost" type="button" id="closeCancel" data-i18n="common.ui.cancel"></button>
+      <span class="spoitable-spacer"></span>
+      <button class="spoitable-btn" type="button" id="closeExit" data-i18n="host.close.exit"></button>
+      <button class="spoitable-btn spoitable-btn-primary" type="button" id="closeTray" data-i18n="host.close.tray"></button>
+    </div>
+  </div>
+</div>
+
 <!-- 右クリックのメニュー。**モジュールの iframe の分もここに描く** —
      中に描かせると、パネルの端でメニューが切れる。 -->
 <div class="ctx" id="ctxMenu" hidden></div>
@@ -502,6 +523,10 @@ const el = {
   licChromium: $('licChromium'),
   licChromiumHint: $('licChromiumHint'),
   licClose: $('licClose'),
+  closeModal: $('closeModal'),
+  closeCancel: $('closeCancel'),
+  closeExit: $('closeExit'),
+  closeTray: $('closeTray'),
   maTitle: $('maTitle'),
   maSub: $('maSub'),
   maUrlStep: $('maUrlStep'),
@@ -1707,6 +1732,16 @@ function applyRange() {
 
 // C# 側 (UiBroadcast) から呼ばれる唯一の入口。
 window.stk = {
+  /**
+   * 閉じるボタンの動きを聞く（C# の DesktopWindow.AskToCloseAsync が、窓の閉じかけを止めてから呼ぶ）。**出せたかを返す** —
+   * 起動の途中（文言をまだ持っていない・bind が済んでいない）なら false で、C# は聞かずにトレイにしまう（設定は聞くのまま）。
+   */
+  askClose() {
+    if (window.__stkReady !== true) return false;
+    openCloseAsk();
+    return true;
+  },
+
   receive(channel, payload) {
     if (channel === 'logEvents' || channel === 'logLines') {
       // **生行も同じ道を通す。** 保存が入のときは生行も通し番号を持つので、
@@ -3987,7 +4022,7 @@ let settingsRefreshMissed = false;   // 設定のモーダルが開いている�
 const settingsModalOpen = () => !!(scState || swState);
 
 /** いま開いているモーダル（ログの絞り込み・手首のショートカット・スイッチの一覧・モジュールを追加）。無ければ null。焦点を中に留めるのに使う。 */
-const openModal = () => [el.filterModal, el.shortcutModal, el.switchModal, el.maModal, $('updateNotesModal'), el.licenseModal].find(modal => !modal.hidden) ?? null;
+const openModal = () => [el.filterModal, el.shortcutModal, el.switchModal, el.maModal, $('updateNotesModal'), el.licenseModal, el.closeModal].find(modal => !modal.hidden) ?? null;
 
 /** 箱の中で Tab の焦点を受けられるもの（見えていて、押せて、inert の中でないもの）を DOM の順に。 */
 function focusablesIn(box) {
@@ -4744,6 +4779,22 @@ function closeLicenses() {
   licenses = null;
 }
 
+/** 閉じるときの問い。開いていれば開き直さない（続けて × を押しても 1 枚）。焦点は「トレイにしまう」（Enter で選べる・終了より弱い方）。 */
+function openCloseAsk() {
+  el.closeModal.hidden = false;
+  el.closeTray.focus();
+}
+
+function closeCloseAsk() {
+  el.closeModal.hidden = true;
+}
+
+/** 答えは C# が設定に書いてから、しまうか終了する（どちらでもこのページは消える）。 */
+function answerCloseAsk(choice) {
+  closeCloseAsk();
+  bridge.answerClose(choice);
+}
+
 // 左の一覧。見出し（本体・モジュール）の下にページを 1 つずつ。見出しの形はアプリのサイドバーと同じ。
 
 function renderCfgNav(pages) {
@@ -5067,6 +5118,7 @@ const bridge = (() => {
     minimizeWindow: call('minimizeWindow'),
     toggleMaximizeWindow: call('toggleMaximizeWindow'),
     closeWindow: call('closeWindow'),
+    answerClose: call('answerClose'),
     beginWindowDrag: call('beginWindowDrag'),
     closeVrWindow: call('closeVrWindow'),
     vrWindowViewing: call('vrWindowViewing'),
@@ -5530,6 +5582,12 @@ async function boot() {
     renderLicenses();
   });
   el.licChromium.addEventListener('click', () => bridge.openChromiumCredits());
+
+  // 閉じるときの問い。外を押す・キャンセル・Esc は何もしない（窓は開いたまま、次に閉じるときにまた聞く）。
+  el.closeTray.addEventListener('click', () => answerCloseAsk('tray'));
+  el.closeExit.addEventListener('click', () => answerCloseAsk('exit'));
+  el.closeCancel.addEventListener('click', closeCloseAsk);
+  el.closeModal.addEventListener('mousedown', event => { if (event.target === el.closeModal) closeCloseAsk(); });
   el.swReset.addEventListener('click', () => { swState.off = [...swState.original]; renderSwitchModal(); });
   el.swDone.addEventListener('click', finishSwitchModal);
   el.scReset.addEventListener('click', () => { scState.placed = [...scState.original]; renderShortcutModal(); });
@@ -5600,6 +5658,7 @@ async function boot() {
       if (!el.maModal.hidden) { closeAddModule(); return; }
       if (!$('updateNotesModal').hidden) { closeUpdateNotes(); return; }
       if (!el.licenseModal.hidden) { closeLicenses(); return; }
+      if (!el.closeModal.hidden) { closeCloseAsk(); return; }
       if (!el.history.hidden) { toggleHistory(false); return; }
       if (!el.logSheet.hidden) { closeSheet(); return; }
     }

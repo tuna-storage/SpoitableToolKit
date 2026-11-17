@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using SpoitableToolKit.Abstractions.Events.Config;
 using SpoitableToolKit.Abstractions.Ui;
 using SpoitableToolKit.Host.App;
+using SpoitableToolKit.Host.App.Startup;
 using SpoitableToolKit.Host.AppLog;
 using SpoitableToolKit.Host.Clipboard;
 using SpoitableToolKit.Host.Config;
@@ -47,7 +48,9 @@ internal static class Program
     {
         // **単一起動の Mutex より前** — 動いているアプリが居ても、Update.exe の呼び出しには答える必要がある。
         // Velopack が入れた形でなければ呼ばない（VelopackUpdateSource.IsVelopackLayout に理由）。
-        if (VelopackUpdateSource.IsVelopackLayout(AppContext.BaseDirectory)) VelopackApp.Build().Run();
+        // アンインストールのときは、Windows の起動時の起動の登録を消す（このあと Velopack がプロセスを閉じる）。
+        if (VelopackUpdateSource.IsVelopackLayout(AppContext.BaseDirectory))
+            VelopackApp.Build().OnBeforeUninstallFastCallback(_ => WindowsStartup.RemoveOnUninstall()).Run();
 
         // 「再起動」で立ち上がったときは、前のアプリが抜けるまで待つ（CEF の置き場・SQLite・心拍計・ポートを取り合わない）。
         AppRestart.WaitForPrevious(args);
@@ -252,6 +255,12 @@ internal static class Program
         updates.FollowInstalledChannel();
         hostConfigEvents.AddListener<IConfigEventListener<HostConfig>>(HostOwner.Instance, updates);
 
+        // Windows の起動時の起動。登録は設定に合わせる（起動したときと変えたとき）。登録できる形（インストール版）でなければ触らず、設定の行も出さない。
+        var startup = WindowsStartup.Create(hostConfig, loggerFactory.CreateLogger<WindowsStartup>());
+        hostConfig.StartWithWindowsAvailable = () => startup.Available;
+        startup.Sync();
+        hostConfigEvents.AddListener<IConfigEventListener<HostConfig>>(HostOwner.Instance, startup);
+
         // 手首のショートカットに置けるもの。**台帳の名前そのもの**（本体・パネルを持つモジュール・モジュールが名乗ったもの）。
         hostConfig.ShortcutTargets = shortcuts.Keys;
 
@@ -302,34 +311,39 @@ internal static class Program
 
             var menus = new ContextMenus(modules.ContextMenuOf, clipboard, uiLogger);
 
+            // 設定の画面の「適用」と、画面の外で選んだ値（閉じるときの問いの答え・トレイのメニュー）が通る道。
+            var applier = new SettingsApplier(configs, hostConfig, text, () => modules.LocaleSources, broadcast,
+                loggerFactory.CreateLogger<SettingsApplier>());
+
             var bridge = new UiBridge(
-                logBus, store, hostConfig, modules, notify, configs, broadcast, text, status, appLog, uiToken, menus, shortcuts,
-                catalog, moduleJobs, uiLogger)
+                logBus, store, hostConfig, modules, notify, configs, text, status, appLog, uiToken, menus, shortcuts,
+                catalog, moduleJobs, applier, uiLogger)
             {
                 VrSlot = vrControls,
                 Gestures = gestures,
                 Updates = updates,
             };
 
-            using var window = new DesktopWindow(bridge, broadcast, single.ShowRequests, uiLogger);
+            // デスクトップの側（窓・トレイ）。窓はトレイにしまうたびに作り直すので、画面へ開けるのは窓ではなくこちら。**窓口の方が先に出来る**ので後から挿す。
+            // VR の周より先に作る（周は UI のスレッドの context を読む。しまった状態で起動すると、窓は 1 つも無い）。
+            using var desktop = new DesktopApp(bridge, broadcast, hostConfig, applier, text, single.ShowRequests,
+                DesktopApp.StartsInTray(args, hostConfig), uiLogger);
+            bridge.Window = desktop;
 
-            // 窓の操作を画面へ開ける。**窓口の方が先に出来る**ので後から挿す。
-            bridge.Window = window;
-
-            // 管理画面の「再起動」。新しいアプリを立ててから、この窓を閉じる（閉じると Application.Run が返って、いつもどおり畳む）。
-            bridge.Restart = new AppRestart(args, window.CloseWindow, loggerFactory.CreateLogger<AppRestart>());
+            // 管理画面の「再起動」。新しいアプリを立ててから、このアプリを終了する（終わると Application.Run が返って、いつもどおり畳む）。
+            bridge.Restart = new AppRestart(args, desktop.Exit, loggerFactory.CreateLogger<AppRestart>());
 
             // 入れたモジュールに新しい版があるか。起動の邪魔をしないよう、少し経ってから（設定で切れる。1 日に 1 回まで）。
             _ = catalog.CheckUpdatesAfterAsync(TimeSpan.FromSeconds(10), notify, closing.Token);
 
-            // 落とし終えたらこの窓を閉じる（閉じると Update.exe が入れて起動し直す）。
-            updates.Close = window.CloseWindow;
+            // 落とし終えたらこのアプリを終了する（終わると Update.exe が入れて起動し直す）。窓を閉じるだけだと、しまう設定ではトレイに残る。
+            updates.Close = desktop.Exit;
             _ = updates.RunAsync(closing.Token);
 
             // SteamVR を検出するまでは CEF を 1 枚も立てない。
             using var vr = VrLoop.Start(broadcast, bridge, hostConfig, configs, uiLogger);
 
-            Application.Run(window);
+            Application.Run(desktop);
         }
         finally
         {

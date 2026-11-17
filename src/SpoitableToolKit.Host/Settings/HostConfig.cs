@@ -4,6 +4,7 @@ using SpoitableToolKit.Abstractions.Config.Attributes;
 using SpoitableToolKit.Abstractions.Notifications;
 using SpoitableToolKit.Abstractions.VrcLog;
 using SpoitableToolKit.Host.Config.Attributes;
+using SpoitableToolKit.Host.Config.Interfaces;
 using SpoitableToolKit.Host.Notifications;
 using SpoitableToolKit.Host.Status;
 using SpoitableToolKit.Host.Theming;
@@ -13,7 +14,7 @@ using SpoitableToolKit.Host.VRChat;
 namespace SpoitableToolKit.Host.Settings;
 
 /// <summary>ホスト本体の設定。モジュールと同じ仕組みに乗せるので、設定画面には本体もモジュールも同じように並ぶ。保存先はデータディレクトリ直下の <c>config.json</c>。</summary>
-internal sealed class HostConfig : IModuleConfig
+internal sealed class HostConfig : IModuleConfig, IRuntimeHiddenSettings
 {
     // 並ぶ順がそのまま画面の順。束ね（SpoitableSettingsGroup）1 つが設定画面の左の一覧の 1 ページになる。
     // 束ねは見せ方だけで、保存は平らなまま（入れ子にすると config.json の形が変わって、打った値が読めなくなる）。
@@ -43,6 +44,40 @@ internal sealed class HostConfig : IModuleConfig
     [SpoitableSettingsDescriptionLocalize("host.settings.hiddenSidebarStatus.description")]
     [SpoitableSettingsSwitches]
     public string[] HiddenSidebarStatus = [];
+
+    /// <summary>
+    /// 閉じるボタン（× / Alt+F4 / タスクバーの「ウィンドウを閉じる」）を押したときの動き。既定は聞く（初めて押したときに聞いて、答えをここへ書く）。
+    /// しまっている間もアプリは動いたまま（VR・記録・モジュール）。ログオフとタスクマネージャーからの終了は、これに関係なく聞かずに終わる
+    /// （<see cref="Ui.Desktop.Closing.CloseDecision"/>）。
+    /// </summary>
+    [SpoitableSettingsGroup("host.settings.group.startup")]
+    [SpoitableSettingsLabelLocalize("host.settings.closeButton.label")]
+    [SpoitableSettingsDescriptionLocalize("host.settings.closeButton.description")]
+    public CloseButtonAction CloseButton = CloseButtonAction.Ask;
+
+    /// <summary>起動したときに窓を開かず、トレイにしまった状態で始める。Windows の起動時の起動は、これに関係なくしまった状態で始まる。</summary>
+    [SpoitableSettingsGroup("host.settings.group.startup")]
+    [SpoitableSettingsLabelLocalize("host.settings.startInTray.label")]
+    [SpoitableSettingsDescriptionLocalize("host.settings.startInTray.description")]
+    public bool StartInTray;
+
+    /// <summary>
+    /// Windows にサインインしたときに起動する（<see cref="App.Startup.WindowsStartup"/> が HKCU の Run に書く）。
+    /// 書き換えるのは起動したときと変えたとき。行を出すのは登録できる形のときだけ（<see cref="StartWithWindowsAvailable"/>）。
+    /// </summary>
+    [SpoitableSettingsGroup("host.settings.group.startup")]
+    [SpoitableSettingsLabelLocalize("host.settings.startWithWindows.label")]
+    [SpoitableSettingsDescriptionLocalize("host.settings.startWithWindows.description")]
+    public bool StartWithWindows;
+
+    /// <summary>
+    /// Windows の起動時の起動を登録できる形か（インストール版か、e2e の向け先がある）。無ければ <see cref="StartWithWindows"/> の行を出さない。
+    /// internal なので設定の項目にはならない（reflection は public だけを見る）。写しには付かないので、読むのは本物から（<see cref="IRuntimeHiddenSettings"/>）。
+    /// </summary>
+    internal Func<bool>? StartWithWindowsAvailable;
+
+    bool IRuntimeHiddenSettings.IsHidden(string memberName) =>
+        memberName == nameof(StartWithWindows) && StartWithWindowsAvailable?.Invoke() != true;
 
     /// <summary>読むのは行が来るたびなので、切り替えはすぐ効く（再起動は要らない）。</summary>
     [SpoitableSettingsGroup("host.settings.group.log")]

@@ -68,7 +68,7 @@ internal sealed class Localizer(ILogger<Localizer> logger) : ILocalizer
     /// 言語を決めて読み込み直す。<c>null</c> / <c>auto</c> なら OS の表示言語に合わせる。
     /// <para>
     /// <b>設定を変えたらこれを呼ぶ。</b> 画面は開くたびに文言を引き直すので、これだけで切り替わる
-    /// （トレイのメニューだけは起動時に組み立てているので、次の起動から）。
+    /// （トレイのメニューも開くたびに組み立て直すので、次に開いたときから）。
     /// </para>
     /// </summary>
     public void Load(string? requested, IEnumerable<LocaleSource> sources)

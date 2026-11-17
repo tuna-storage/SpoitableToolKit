@@ -22,7 +22,10 @@ internal sealed class AppUpdates(
     private AppUpdateOffer? _offer;
     private int? _percent;
 
-    /// <summary>窓が出来てから挿す。</summary>
+    /// <summary>
+    /// 落とし終えたら呼ぶ、アプリを終了する口（<see cref="Ui.Desktop.DesktopApp.Exit"/>。終わると Update.exe が入れて起動し直す）。
+    /// 窓を閉じる口ではない — 閉じるボタンがトレイにしまう設定だと、落とし終えた更新がしまわれるだけで入らない。デスクトップの側が出来てから挿す。
+    /// </summary>
     internal Action? Close;
 
     public AppUpdateView View()

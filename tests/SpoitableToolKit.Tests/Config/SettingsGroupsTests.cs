@@ -33,7 +33,7 @@ public sealed class SettingsGroupsTests
 
         Assert.Equal(
             [
-                "host.settings.group.display", "host.settings.group.log", "host.settings.group.notify", "host.settings.group.osc",
+                "host.settings.group.display", "host.settings.group.startup", "host.settings.group.log", "host.settings.group.notify", "host.settings.group.osc",
                 "host.settings.group.vr", "host.settings.group.modules", "host.settings.group.updates",
             ],
             keys);

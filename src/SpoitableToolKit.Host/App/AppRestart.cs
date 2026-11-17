@@ -14,6 +14,7 @@ namespace SpoitableToolKit.Host.App;
 /// 渡す引数をそのファイルへ書いて、このアプリも閉じない（試験が知らないアプリが残らないように）。
 /// </para>
 /// </summary>
+/// <param name="closeApp">このアプリを終了する（<see cref="Ui.Desktop.DesktopApp.Exit"/>）。</param>
 internal sealed class AppRestart(IReadOnlyList<string> arguments, Action closeApp, ILogger logger)
 {
     /// <summary>新しいアプリに渡す「この PID が抜けるまで待つ」の印。</summary>
@@ -27,6 +28,8 @@ internal sealed class AppRestart(IReadOnlyList<string> arguments, Action closeAp
 
     /// <summary>
     /// 新しいアプリに渡す引数。今の引数をそのまま（前の <see cref="WaitArgument"/> は外す）に、待つ印を足す。
+    /// トレイにしまって始める印（<see cref="Startup.WindowsStartup.TrayArgument"/>。Windows の起動時の起動が付ける）も外す —
+    /// 自動で起動した回に窓から「再起動」すると、窓が消えてトレイに隠れたまま戻ってくる（しまって始めたい人は設定で選べる）。
     /// </summary>
     public static string[] ArgumentsFor(IReadOnlyList<string> current, int processId)
     {
@@ -39,6 +42,8 @@ internal sealed class AppRestart(IReadOnlyList<string> arguments, Action closeAp
                 continue;
             }
 
+            if (current[i] == Startup.WindowsStartup.TrayArgument) continue;
+
             next.Add(current[i]);
         }
 
@@ -48,7 +53,8 @@ internal sealed class AppRestart(IReadOnlyList<string> arguments, Action closeAp
     }
 
     /// <summary>
-    /// 起動し直す。新しいアプリを立てられたら、このアプリを閉じる。立てられなければ閉じない（何も動いていない状態にしない）。
+    /// 起動し直す。新しいアプリを立てられたら、このアプリを終了する（窓を閉じるのではない — 閉じるボタンがトレイにしまう設定でも、終わる）。
+    /// 立てられなければ終了しない（何も動いていない状態にしない）。
     /// </summary>
     public bool Request()
     {
