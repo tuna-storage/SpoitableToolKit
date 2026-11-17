@@ -1,6 +1,7 @@
 using SpoitableToolKit.Host.App;
 using SpoitableToolKit.Host.Config;
 using System.Diagnostics;
+using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using SpoitableToolKit.Host.Events;
@@ -31,6 +32,10 @@ public sealed class ModuleCatalogTests : IDisposable
     private readonly FakeGitHub _github = new();
     private readonly ManualClock _clock = new();
     private readonly FakeNotifications _notify = new();
+
+    /// <summary>試験の見本のモジュールが build された版（repo の版と同じ）。直書きすると、版を上げるたびに試験が落ちる。</summary>
+    private static readonly string BuiltVersion =
+        typeof(ModuleCatalog).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion.Split('+')[0];
 
     private string User => Path.Combine(_root, "user");
 
@@ -303,7 +308,7 @@ public sealed class ModuleCatalogTests : IDisposable
 
         Assert.Equal("library", Entry(catalog, "contracts").GetProperty("kind").GetString());
         Assert.Equal("running", Entry(catalog, "contracts").GetProperty("state").GetString());
-        Assert.Equal(["TestContract 2026.11.0"], Entry(catalog, "contracts").GetProperty("shared").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal([$"TestContract {BuiltVersion}"], Entry(catalog, "contracts").GetProperty("shared").EnumerateArray().Select(e => e.GetString()));
 
         var provider = Entry(catalog, "provider");
         Assert.Equal("off", provider.GetProperty("state").GetString());
@@ -321,7 +326,7 @@ public sealed class ModuleCatalogTests : IDisposable
         Assert.Contains("OnAllModulesLoaded threw: InvalidOperationException: No module is registered as 'provider.greeter'", reason);
         Assert.Contains("the module 'provider' is not installed, is turned off, or failed to start", reason);
         Assert.True(consumer.GetProperty("canRemove").GetBoolean());
-        Assert.Equal("2026.11.0", consumer.GetProperty("version").GetString());
+        Assert.Equal(BuiltVersion, consumer.GetProperty("version").GetString());
 
         Assert.Equal("broken", Entry(catalog, "empty").GetProperty("state").GetString());
         Assert.False(RestartNeeded(catalog));
@@ -520,7 +525,7 @@ public sealed class ModuleCatalogTests : IDisposable
         var staged = await Stage(catalog);
         Assert.True(staged.Replaces);
         Assert.True(staged.ReplacesBundled);
-        Assert.Equal("2026.11.0", staged.ReplacesVersion);
+        Assert.Equal(BuiltVersion, staged.ReplacesVersion);
         Assert.True(catalog.ConfirmInstall(staged.Token));
 
         var entry = Assert.Single(Entries(catalog).EnumerateArray(), e => e.GetProperty("id").GetString() == "provider");
