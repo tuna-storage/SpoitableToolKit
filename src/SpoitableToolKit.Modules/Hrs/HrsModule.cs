@@ -405,7 +405,8 @@ public sealed class HrsModule : ISpoitableModule, IConfigEventListener<HrsConfig
     /// 設定の画面の「適用」で入る値の確かめ（<see cref="OnConfigChanging"/>）と同じく、<see cref="DeviceSelector"/> で読める値だけを入れる。
     /// </para>
     /// <para>
-    /// 値が今と同じ（指定どおりの 1 台を手で切ってある・探している最中）なら設定は書かず、ヘッダーの「接続」と同じ道で繋ぎ直す（手で切った印を外す）。
+    /// 指定がもうこの 1 台（アドレスが同じ。手で切ってある・探している最中）なら設定は書かず、ヘッダーの「接続」と同じ道で繋ぎ直す（手で切った印を外す）。
+    /// 名前が違っても書き換えない（利用者が打った名前かもしれない — 組み立て直さない）。
     /// </para>
     /// </summary>
     private string UseMonitor(string payload)
@@ -429,11 +430,11 @@ public sealed class HrsModule : ISpoitableModule, IConfigEventListener<HrsConfig
         if (!DeviceSelector.TryParse(device, out _, out _))
             return Answer(new HrsUseMonitorAnswer(Accepted: false, Device: null));
 
-        if (_config.Device == device)
+        if (DeviceSelector.TryParse(_config.Device, out var current, out _) && current.Address == address)
         {
-            _logger.LogInformation("Heart rate source: connecting {Device} again from the monitors list", device);
+            _logger.LogInformation("Heart rate source: connecting {Device} again from the monitors list", _config.Device);
             _ = _capture.Connect();
-            return Answer(new HrsUseMonitorAnswer(Accepted: true, Device: device));
+            return Answer(new HrsUseMonitorAnswer(Accepted: true, Device: _config.Device));
         }
 
         _logger.LogInformation("Heart rate source: switching to {Device} from the monitors list", device);

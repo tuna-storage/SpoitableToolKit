@@ -362,7 +362,8 @@ public sealed class HrsTests
             using (var answer = JsonDocument.Parse(await module.HandleUiCallAsync("useMonitor", payload)))
                 Assert.False(answer.RootElement.GetProperty("accepted").GetBoolean());
 
-            await Task.Delay(200);
+            // 周回を作り直していないこと（作り直すなら前の周回の後片付けのあとに数が増える）。待つのは後片付けより十分長く。
+            await Task.Delay(500);
             Assert.Equal("", ((HrsConfig)module.Config!).Device);
             Assert.Equal(0, host.ConfigSaves);
             Assert.Equal(1, source.Runs);
@@ -374,12 +375,13 @@ public sealed class HrsTests
     }
 
     /// <summary>
-    /// 指定どおりの 1 台を手で切ってあるときにその行の「接続」を押すと、値は変わらないので設定は書かず、ヘッダーの「接続」と同じく手で切った印を外して繋ぎ直す。
+    /// 指定どおりの 1 台（アドレスが同じ）を手で切ってあるときにその行の「接続」を押すと、設定は書かず、ヘッダーの「接続」と同じく手で切った印を外して繋ぎ直す。
+    /// 指定の名前が行の名前と違っても（利用者が打った名前）、書き換えない。
     /// </summary>
     [Fact]
     public async Task UsingTheConfiguredMonitorAfterDisconnectingItByHandConnectsItAgain()
     {
-        var (module, host, source) = NewModule(c => c.Device = "Fake [A1:B2:C3:D4:E5:F6]");
+        var (module, host, source) = NewModule(c => c.Device = "My belt [A1:B2:C3:D4:E5:F6]");
         try
         {
             await WaitFor(() => host.Osc.Last("/avatar/parameters/HR") is 72);
@@ -389,9 +391,10 @@ public sealed class HrsTests
             using (var answer = JsonDocument.Parse(await module.HandleUiCallAsync("useMonitor", """{"name":"Fake","address":"A1:B2:C3:D4:E5:F6"}""")))
             {
                 Assert.True(answer.RootElement.GetProperty("accepted").GetBoolean());
-                Assert.Equal("Fake [A1:B2:C3:D4:E5:F6]", answer.RootElement.GetProperty("device").GetString());
+                Assert.Equal("My belt [A1:B2:C3:D4:E5:F6]", answer.RootElement.GetProperty("device").GetString());
             }
 
+            Assert.Equal("My belt [A1:B2:C3:D4:E5:F6]", ((HrsConfig)module.Config!).Device);
             Assert.Null(source.HeldOff);
             Assert.NotNull(source.Connected);
             Assert.Equal(0, host.ConfigSaves);
