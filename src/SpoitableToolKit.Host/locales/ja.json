@@ -164,7 +164,7 @@
   "host.settings.startInTray.label": "トレイにしまった状態で起動する",
   "host.settings.startInTray.description": "起動したときにウィンドウを開かず、タスクトレイにしまった状態で始めます。ウィンドウはトレイのアイコンから開けます。",
   "host.settings.startWithWindows.label": "Windows の起動時に起動する",
-  "host.settings.startWithWindows.description": "Windows にサインインしたときに、タスクトレイにしまった状態で起動します。",
+  "host.settings.startWithWindows.description": "Windows にサインインしたときに、タスクトレイにしまった状態で起動します。タスクマネージャーなどの「スタートアップ アプリ」で無効にした場合は、この設定も OFF になります。",
   "host.close.title": "ウィンドウを閉じたときの動作",
   "host.close.lead": "閉じるボタンを押したときに、アプリをタスクトレイにしまうか、終了するかを選んでください。トレイにしまっている間も、VR の表示や記録は続きます。",
   "host.close.note": "選んだ動作は保存され、次からは確認しません。あとで設定の「起動と終了」から変えられます。",

@@ -255,11 +255,18 @@ internal static class Program
         updates.FollowInstalledChannel();
         hostConfigEvents.AddListener<IConfigEventListener<HostConfig>>(HostOwner.Instance, updates);
 
-        // Windows の起動時の起動。登録は設定に合わせる（起動したときと変えたとき）。登録できる形（インストール版）でなければ触らず、設定の行も出さない。
-        var startup = WindowsStartup.Create(hostConfig, loggerFactory.CreateLogger<WindowsStartup>());
+        // 設定の画面の「適用」と、画面の外で選んだ値（閉じるときの問いの答え・トレイのメニュー・Windows の側で切られた起動）が通る道。
+        var applier = new SettingsApplier(configs, hostConfig, text, () => modules.LocaleSources, broadcast,
+            loggerFactory.CreateLogger<SettingsApplier>());
+
+        // Windows の起動時の起動。登録は設定に合わせる（起動したときと変えたとき）。Windows の側で切られていたら、先に設定へ写す。
+        // 登録できる形（インストール版）でなければ触らず、設定の行も出さない。
+        var startup = WindowsStartup.Create(hostConfig,
+            wanted => applier.SetHost(nameof(HostConfig.StartWithWindows), System.Text.Json.Nodes.JsonValue.Create(wanted)),
+            loggerFactory.CreateLogger<WindowsStartup>());
         hostConfig.StartWithWindowsAvailable = () => startup.Available;
-        startup.Sync();
         hostConfigEvents.AddListener<IConfigEventListener<HostConfig>>(HostOwner.Instance, startup);
+        startup.Reconcile();
 
         // 手首のショートカットに置けるもの。**台帳の名前そのもの**（本体・パネルを持つモジュール・モジュールが名乗ったもの）。
         hostConfig.ShortcutTargets = shortcuts.Keys;
@@ -311,10 +318,6 @@ internal static class Program
 
             var menus = new ContextMenus(modules.ContextMenuOf, clipboard, uiLogger);
 
-            // 設定の画面の「適用」と、画面の外で選んだ値（閉じるときの問いの答え・トレイのメニュー）が通る道。
-            var applier = new SettingsApplier(configs, hostConfig, text, () => modules.LocaleSources, broadcast,
-                loggerFactory.CreateLogger<SettingsApplier>());
-
             var bridge = new UiBridge(
                 logBus, store, hostConfig, modules, notify, configs, text, status, appLog, uiToken, menus, shortcuts,
                 catalog, moduleJobs, applier, uiLogger)
@@ -322,6 +325,7 @@ internal static class Program
                 VrSlot = vrControls,
                 Gestures = gestures,
                 Updates = updates,
+                Startup = startup,
             };
 
             // デスクトップの側（窓・トレイ）。窓はトレイにしまうたびに作り直すので、画面へ開けるのは窓ではなくこちら。**窓口の方が先に出来る**ので後から挿す。

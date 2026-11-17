@@ -17,4 +17,31 @@ internal static class StartupRegistration
 
         return string.Equals(registered, command, StringComparison.OrdinalIgnoreCase) ? StartupChange.None : StartupChange.Write;
     }
+
+    /// <summary>切ったことを表す先頭の 1 バイト。</summary>
+    private const byte DisabledMark = 0x03;
+
+    /// <summary>
+    /// Windows の「スタートアップ アプリ」の印（REG_BINARY、12 バイト）を読む。先頭の 1 バイトが 03 なら、利用者が Windows の側で切った（続く 8 バイトは切った時刻の FILETIME）。
+    /// ほかの値（02・01 で、時刻は 0）は入として扱う。印が無ければ <see cref="StartupApproval.Missing"/>（Windows も入として扱う）。
+    /// </summary>
+    public static StartupApproval ApprovalOf(byte[]? mark) => mark switch
+    {
+        null => StartupApproval.Missing,
+        [DisabledMark, ..] => StartupApproval.Disabled,
+        _ => StartupApproval.Enabled,
+    };
+
+    /// <summary>
+    /// 設定が入なのに Windows の側で切られている（起動したとき・設定の画面を開いたときに見る）。切られた方を正として、設定を切に写す。
+    /// 設定を変えたその場では見ない — 利用者がこちらで入れ直したなら、こちらが新しい（<see cref="ClearsApproval"/>）。
+    /// </summary>
+    public static bool TurnedOffInWindows(bool wanted, StartupApproval approval) => wanted && approval == StartupApproval.Disabled;
+
+    /// <summary>
+    /// Windows の側の印を消すか。入なら、切の印が残っていれば消す（残すと Run を書いても起動しない）。
+    /// 切なら、どんな印でも残さない（Run の値と一緒に片付ける。Run が無いのに印だけ残る形にしない）。
+    /// </summary>
+    public static bool ClearsApproval(bool wanted, StartupApproval approval) =>
+        wanted ? approval == StartupApproval.Disabled : approval != StartupApproval.Missing;
 }

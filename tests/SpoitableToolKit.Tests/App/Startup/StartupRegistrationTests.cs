@@ -39,4 +39,75 @@ public sealed class StartupRegistrationTests
 
         Assert.Equal(["--x", "--y", AppRestart.WaitArgument, "42"], next);
     }
+
+    /// <summary>
+    /// Windows の「スタートアップ アプリ」の印（12 バイト）。切ったものは先頭が 03 で、続く 8 バイトが切った時刻。入のものは 02 か 01 で、時刻は 0。
+    /// </summary>
+    [Theory]
+    [InlineData("03 00 00 00 00 40 2B 6A 12 34 DB 01", "Disabled")]
+    [InlineData("03 00 00 00 00 00 00 00 00 00 00 00", "Disabled")]
+    [InlineData("02 00 00 00 00 00 00 00 00 00 00 00", "Enabled")]
+    [InlineData("01 00 00 00 00 00 00 00 00 00 00 00", "Enabled")]
+    [InlineData("", "Enabled")]
+    [InlineData(null, "Missing")]
+    public void TheWindowsMarkIsReadFromItsFirstByte(string? hex, string expected)
+    {
+        var mark = hex is null ? null : Convert.FromHexString(hex.Replace(" ", ""));
+
+        Assert.Equal(Enum.Parse<StartupApproval>(expected), StartupRegistration.ApprovalOf(mark));
+    }
+
+    /// <summary>Windows で切られた起動を設定へ写すのは、設定が入で印が切のときだけ。</summary>
+    [Theory]
+    [InlineData(true, "Disabled", true)]
+    [InlineData(true, "Enabled", false)]
+    [InlineData(true, "Missing", false)]
+    [InlineData(false, "Disabled", false)]
+    [InlineData(false, "Enabled", false)]
+    public void OnlyAnOnSettingTurnedOffInWindowsFollowsWindows(bool wanted, string approval, bool expected)
+    {
+        Assert.Equal(expected, StartupRegistration.TurnedOffInWindows(wanted, Enum.Parse<StartupApproval>(approval)));
+    }
+
+    /// <summary>入なら切の印だけを消す（入の印は Windows のもの。消さなくても起動する）。切ならどの印も残さない。</summary>
+    [Theory]
+    [InlineData(true, "Disabled", true)]
+    [InlineData(true, "Enabled", false)]
+    [InlineData(true, "Missing", false)]
+    [InlineData(false, "Disabled", true)]
+    [InlineData(false, "Enabled", true)]
+    [InlineData(false, "Missing", false)]
+    public void TheMarkIsClearedSoItAgreesWithTheSetting(bool wanted, string approval, bool expected)
+    {
+        Assert.Equal(expected, StartupRegistration.ClearsApproval(wanted, Enum.Parse<StartupApproval>(approval)));
+    }
+
+    /// <summary>e2e の向け先では、印は隣のファイルに 16 進で入っている（レジストリの値と同じ並び）。読めない中身は読めないものとして扱う（例外。起動は止めない側で受ける）。</summary>
+    [Fact]
+    public void TheE2eFileKeepsTheMarkNextToIt()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "stk-tests", Guid.NewGuid().ToString("N") + ".txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var key = new RunKeyFile(path);
+        try
+        {
+            Assert.Equal(StartupApproval.Missing, key.ReadApproval());
+
+            File.WriteAllText(key.ApprovalPath, "03 00 00 00 00 40 2B 6A 12 34 DB 01\r\n");
+            Assert.Equal(StartupApproval.Disabled, key.ReadApproval());
+
+            File.WriteAllText(key.ApprovalPath, "02 00 00 00 00 00 00 00 00 00 00 00");
+            Assert.Equal(StartupApproval.Enabled, key.ReadApproval());
+
+            File.WriteAllText(key.ApprovalPath, "not hex");
+            Assert.Throws<IOException>(() => key.ReadApproval());
+
+            key.RemoveApproval();
+            Assert.False(File.Exists(key.ApprovalPath));
+        }
+        finally
+        {
+            if (File.Exists(key.ApprovalPath)) File.Delete(key.ApprovalPath);
+        }
+    }
 }

@@ -8,6 +8,7 @@ using SpoitableToolKit.Abstractions.Notifications;
 using SpoitableToolKit.Abstractions.Ui;
 using SpoitableToolKit.Abstractions.VrcLog;
 using SpoitableToolKit.Host.App;
+using SpoitableToolKit.Host.App.Startup;
 using SpoitableToolKit.Host.AppLog;
 using SpoitableToolKit.Host.Clipboard;
 using SpoitableToolKit.Host.Config;
@@ -242,8 +243,14 @@ internal sealed class UiBridge(
     {
         Authorize(token);
 
+        // Windows の「スタートアップ アプリ」で切られていたら、画面に出す前に設定へ写す（出す値が Windows の状態と食い違わないように）。
+        Startup?.Reconcile();
+
         return configs.Describe(localizer);
     }
+
+    /// <summary>Windows の起動時の起動。窓口より後に作られることがあるので、後から挿す（<see cref="Updates"/> と同じ）。</summary>
+    internal WindowsStartup? Startup;
 
     /// <summary>画面の文言。シェルもモジュールのパネルも、これを 1 回受け取って自分で引く（1 語ずつ往復すると、描くたびに何十回も橋を渡ることになる）。</summary>
     public object GetStrings(string token)
