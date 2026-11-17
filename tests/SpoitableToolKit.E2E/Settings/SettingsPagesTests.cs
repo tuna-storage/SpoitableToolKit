@@ -221,7 +221,10 @@ public sealed class SettingsPagesTests(AppFixture app) : IClassFixture<AppFixtur
         }
         finally
         {
+            // 戻りきるまで待つ（同じクラスのほかの試験は既定の入を見る。投げただけで抜けると、画面と config.json が戻る前に次が読む）。
             await Page.EvaluateAsync("() => bridge.applyConfigChanges(JSON.stringify({ host: { VrDashboard: true } }))");
+            Assert.True(await SavedAsync("VrDashboard", true), "VrDashboard が入に戻らなかった");
+            await Assertions.Expect(dashboard).ToBeCheckedAsync();
         }
     }
 
