@@ -137,9 +137,13 @@ public sealed class VideoUrlServerTests
             context.Response.Close();
         }
 
-        /// <summary><c>yt-dlp -J</c> の出力のうち、後段が見るところだけを持った JSON。クライアントごとに違うものを返す（HLS を出すのは web_safari だけ）。</summary>
-        private static string CannedFor(string? client, int port) => client == "web_safari"
-            ? $$"""
+        /// <summary>
+        /// <c>yt-dlp -J</c> の出力のうち、後段が見るところだけを持った JSON。クライアントごとに違うものを返す
+        /// （HLS を出すのは web_safari だけ、音声だけを出すのは default だけ）。
+        /// </summary>
+        private static string CannedFor(string? client, int port) => client switch
+        {
+            "web_safari" => $$"""
                 {
                   "title": "canned",
                   "formats": [{
@@ -148,8 +152,18 @@ public sealed class VideoUrlServerTests
                     "url": "http://127.0.0.1:{{port}}/media/hls"
                   }]
                 }
-                """
-            : $$"""
+                """,
+            "default" => $$"""
+                {
+                  "title": "canned",
+                  "formats": [{
+                    "format_id": "140", "protocol": "https", "ext": "m4a",
+                    "vcodec": "none", "acodec": "mp4a.40.2", "abr": 129.502,
+                    "url": "http://127.0.0.1:{{port}}/media/m4a"
+                  }]
+                }
+                """,
+            _ => $$"""
                 {
                   "title": "canned",
                   "formats": [{
@@ -158,7 +172,8 @@ public sealed class VideoUrlServerTests
                     "url": "http://127.0.0.1:{{port}}/media/mp4"
                   }]
                 }
-                """;
+                """,
+        };
     }
 
     private static (YouTubeResolver Resolver, VideoUrlConfig Config) Resolver(string url, string token = "")
@@ -171,7 +186,10 @@ public sealed class VideoUrlServerTests
         return (new YouTubeResolver(new ExplodingTools(), new FakeLocalizer(), NullLogger.Instance, config), config);
     }
 
-    /// <summary>クライアント 1 つにつき 1 回頼む（HLS と progressive は取れるクライアントが違う。サーバー側でまとめさせると「どれを使うか」の規則がサーバーにも住む）。</summary>
+    /// <summary>
+    /// クライアント 1 つにつき 1 回頼む（HLS と progressive と音声だけは、取れるクライアントがそれぞれ違う。サーバー側でまとめさせると「どれを使うか」の規則がサーバーにも住む）。
+    /// 並びは映像のあるものが先。画面はこの並びのまま出す。
+    /// </summary>
     [Fact]
     public async Task TheServerIsAskedOncePerPlayerClient()
     {
@@ -180,15 +198,73 @@ public sealed class VideoUrlServerTests
 
         var result = await resolver.ResolveAsync(Video, CancellationToken.None);
 
-        var clients = server.Received
-            .Select(a => JsonDocument.Parse(a.Body).RootElement.GetProperty("client").GetString() ?? "")
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-
-        Assert.Equal(["android", "web_safari"], clients);
+        var clients = AskedClients(server);
+        Assert.Equal(["android", "default", "web_safari"], clients);
 
         Assert.Equal("canned", result.Title);
-        Assert.Equal(["hls", "muxed"], [.. result.Streams.Select(s => s.Kind).Order(StringComparer.Ordinal)]);
+        Assert.Equal(["hls", "muxed", "audio"], [.. result.Streams.Select(s => s.Kind)]);
+    }
+
+    /// <summary>音声だけのクライアントを空にすると、音声だけの 1 本は頼まない。</summary>
+    [Fact]
+    public async Task AnEmptyAudioClientAsksForNoAudio()
+    {
+        using var server = new FakeServer();
+        var (resolver, config) = Resolver($"http://127.0.0.1:{server.Port}/resolve");
+
+        config.Clients.Audio = " ";
+
+        var result = await resolver.ResolveAsync(Video, CancellationToken.None);
+
+        var clients = AskedClients(server);
+        Assert.Equal(["android", "web_safari"], clients);
+        Assert.Equal(["hls", "muxed"], [.. result.Streams.Select(s => s.Kind)]);
+    }
+
+    /// <summary>
+    /// 音声だけのクライアントしか残っていなくても頼む（断らない）。取れたものは音声だけなので、「360p の mp4 が上限」の知らせは出さない。
+    /// 題はそこから取る。
+    /// </summary>
+    [Fact]
+    public async Task TheAudioClientAloneIsEnough()
+    {
+        using var server = new FakeServer();
+        var (resolver, config) = Resolver($"http://127.0.0.1:{server.Port}/resolve");
+
+        config.Clients.Hls = "";
+        config.Clients.Progressive = "";
+
+        var result = await resolver.ResolveAsync(Video, CancellationToken.None);
+
+        var clients = AskedClients(server);
+        Assert.Equal(["default"], clients);
+        Assert.Equal(["audio"], [.. result.Streams.Select(s => s.Kind)]);
+        Assert.Equal(("canned", (string?)null), (result.Title, result.Notice));
+    }
+
+    /// <summary>HLS が取れずに mp4 が取れたときは、動画側の事情だと知らせる（音声だけの 1 本が並んでいても）。</summary>
+    [Fact]
+    public async Task WithoutHlsTheNoticeSaysTheMp4IsTheCeiling()
+    {
+        using var server = new FakeServer();
+        var (resolver, config) = Resolver($"http://127.0.0.1:{server.Port}/resolve");
+
+        config.Clients.Hls = "";
+
+        var result = await resolver.ResolveAsync(Video, CancellationToken.None);
+
+        Assert.Equal(["muxed", "audio"], [.. result.Streams.Select(s => s.Kind)]);
+        Assert.Equal("videourl.note.noHls", result.Notice);
+    }
+
+    private static string[] AskedClients(FakeServer server)
+    {
+        lock (server.Received)
+        {
+            return [.. server.Received
+                .Select(a => JsonDocument.Parse(a.Body).RootElement.GetProperty("client").GetString() ?? "")
+                .Order(StringComparer.Ordinal)];
+        }
     }
 
     [Fact]
@@ -347,18 +423,15 @@ public sealed class VideoUrlServerTests
 
         config.Clients.Hls = "ios";
         config.Clients.Progressive = "tv";
+        config.Clients.Audio = "web";
 
         await resolver.ResolveAsync(Video, CancellationToken.None);
 
-        var clients = server.Received
-            .Select(a => JsonDocument.Parse(a.Body).RootElement.GetProperty("client").GetString() ?? "")
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-
-        Assert.Equal(["ios", "tv"], clients);
+        var clients = AskedClients(server);
+        Assert.Equal(["ios", "tv", "web"], clients);
     }
 
-    /// <summary>空にした方は頼まない（片方で足りる人が要求を半分にできる）。</summary>
+    /// <summary>空にしたものは頼まない（要らないものを空にすれば、要求を減らせる）。</summary>
     [Fact]
     public async Task AnEmptyPlayerClientIsNotAskedFor()
     {
@@ -366,6 +439,7 @@ public sealed class VideoUrlServerTests
         var (resolver, config) = Resolver($"http://127.0.0.1:{server.Port}/resolve");
 
         config.Clients.Progressive = "";
+        config.Clients.Audio = "";
 
         var result = await resolver.ResolveAsync(Video, CancellationToken.None);
 
@@ -376,7 +450,7 @@ public sealed class VideoUrlServerTests
         Assert.Equal(["hls"], [.. result.Streams.Select(s => s.Kind)]);
     }
 
-    /// <summary>両方空なら誰にも頼まずに断る（頼みに行ってから落ちると、設定が空なだけなのにネットワークの話に見える）。</summary>
+    /// <summary>全部空なら誰にも頼まずに断る（頼みに行ってから落ちると、設定が空なだけなのにネットワークの話に見える）。</summary>
     [Fact]
     public async Task WithNoPlayerClientAtAllNobodyIsAsked()
     {
@@ -385,6 +459,7 @@ public sealed class VideoUrlServerTests
 
         config.Clients.Hls = "  ";
         config.Clients.Progressive = "";
+        config.Clients.Audio = "";
 
         var failed = await Assert.ThrowsAsync<InvalidOperationException>(
             () => resolver.ResolveAsync(Video, CancellationToken.None));

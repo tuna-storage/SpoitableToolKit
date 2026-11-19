@@ -4,8 +4,8 @@ using SpoitableToolKit.Abstractions.Localization;
 namespace SpoitableToolKit.Modules.VideoUrl.Resolving;
 
 /// <summary>
-/// yt-dlp の <c>-J</c> の出力（<c>formats</c>）から、<b>1 本で音まで出る</b>ものだけを選ぶ。VRChat のプレイヤーに渡せるのは URL 1 本で、
-/// 映像と音声を自前で合成することはできない。
+/// yt-dlp の <c>-J</c> の出力（<c>formats</c>）から、<b>1 本で音まで出る</b>ものを選ぶ。VRChat のプレイヤーに渡せるのは URL 1 本で、
+/// 映像と音声を自前で合成することはできない。映像だけの 1 本は音が出ないので選ばない。音声だけの 1 本は、音楽を流す用に選ぶ。
 /// </summary>
 internal static class StreamPicker
 {
@@ -63,6 +63,42 @@ internal static class StreamPicker
                 "muxed", url, text["videourl.stream.muxed.note"]));
         }
     }
+
+    /// <summary>
+    /// 音声だけの 1 本（映像は出ない）。入れ物（m4a・webm）ごとに 1 本ずつ選び、m4a を先に並べる。
+    /// <para>
+    /// 吹き替えのある動画では、同じ itag が言語の数だけ並ぶ（実測で 24 本）。元の言語は <c>language_preference</c> が 10 で、
+    /// 吹き替えは -1 なので、それを先に見る。音量をならした版（<c>format_id</c> が <c>-drc</c> で終わる）は、
+    /// 普通の版があればそちらを選ぶ。そのうえでビットレート（<c>abr</c>）の高いものを取る。
+    /// </para>
+    /// </summary>
+    public static void AddAudioOnly(List<JsonElement> formats, List<ResolvedStream> streams, ILocalizer text)
+    {
+        var picked = formats
+            .Where(f => Codec(f, "vcodec") is null && Codec(f, "acodec") is not null)
+            .Where(f => JsonFields.Text(f, "protocol")?.StartsWith("http", StringComparison.Ordinal) == true)
+            .Where(f => JsonFields.Text(f, "url") is { Length: > 0 })
+            .GroupBy(f => JsonFields.Text(f, "ext") ?? "")
+            .Select(sameExt => sameExt
+                .OrderByDescending(f => JsonFields.Number(f, "language_preference"))
+                .ThenBy(IsDrc)
+                .ThenByDescending(f => JsonFields.Number(f, "abr"))
+                .First())
+            .OrderBy(f => JsonFields.Text(f, "ext") == "m4a" ? 0 : 1);
+
+        foreach (var format in picked)
+        {
+            var bitrate = JsonFields.Number(format, "abr");
+            streams.Add(new ResolvedStream(
+                text.Format("videourl.stream.audio.label", bitrate > 0 ? $"{bitrate} kbps" : text["videourl.stream.audio.best"],
+                    JsonFields.Text(format, "ext") is { Length: > 0 } ext ? ext : "?"),
+                "audio", JsonFields.Text(format, "url")!, text["videourl.stream.audio.note"]));
+        }
+    }
+
+    /// <summary>音量をならした版か。yt-dlp は <c>format_id</c> の後ろに <c>-drc</c> を付けて分ける。</summary>
+    private static bool IsDrc(JsonElement format) =>
+        JsonFields.Text(format, "format_id")?.EndsWith("-drc", StringComparison.Ordinal) == true;
 
     /// <summary>コーデック名。無い場合（<c>"none"</c> / null）は null を返す。</summary>
     private static string? Codec(JsonElement element, string name) =>

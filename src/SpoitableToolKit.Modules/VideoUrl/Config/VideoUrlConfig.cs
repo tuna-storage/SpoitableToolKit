@@ -40,10 +40,11 @@ public sealed class VideoUrlConfig : IModuleConfig
     public IReadOnlyList<string>? SuggestValuesFor(string memberName) =>
         memberName == $"{nameof(Clients)}.{nameof(PlayerClients.Hls)}"
         || memberName == $"{nameof(Clients)}.{nameof(PlayerClients.Progressive)}"
+        || memberName == $"{nameof(Clients)}.{nameof(PlayerClients.Audio)}"
             ? KnownClients
             : null;
 
-    /// <summary>実測で見たことのある名前。<b>網羅ではない</b>。</summary>
+    /// <summary>実測で見たことのある名前。<b>網羅ではない</b>。<c>default</c> は yt-dlp の既定の組み合わせ。</summary>
     private static readonly string[] KnownClients =
-        ["web_safari", "android", "ios", "tv", "mweb", "web", "web_embedded"];
+        ["web_safari", "android", "default", "ios", "tv", "mweb", "web", "web_embedded"];
 }

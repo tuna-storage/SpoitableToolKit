@@ -6,11 +6,11 @@ namespace SpoitableToolKit.Modules.VideoUrl.Config;
 /// <summary>
 /// yt-dlp に名乗らせるクライアント（<c>--extractor-args youtube:player_client=…</c>）。
 /// <para>
-/// <b>取れるものがクライアントごとに違う</b>ので 2 本に分けてある。既定は実測で決めたもので、
+/// <b>取れるものがクライアントごとに違う</b>ので 3 本に分けてある。既定は実測で決めたもので、
 /// 普通は触らなくてよい。<b>畳んであるのはそのため</b>。
 /// </para>
 /// <para>
-/// <b>空にするとその 1 本を頼まない。</b> 片方だけで足りるなら、要求を半分にできる。
+/// <b>空にするとその 1 本を頼まない。</b> 要らないものを空にすれば、要求を減らせる。
 /// </para>
 /// </summary>
 [SpoitableSettingsCategory(SpoitableCategory.Foldable)]
@@ -43,4 +43,19 @@ public sealed class PlayerClients : ISpoitableSettings
     [SpoitableSettingsLabelLocalize("videourl.settings.clients.progressive.label")]
     [SpoitableSettingsDescriptionLocalize("videourl.settings.clients.progressive.description")]
     public string Progressive = "android";
+
+    /// <summary>
+    /// 音声だけ（itag 140 の m4a、251 の webm）を取るクライアント。<c>default</c> は yt-dlp の既定の組み合わせを指す名前で、
+    /// yt-dlp の版が変わっても、その版の既定に付いていく。
+    /// <para>
+    /// <b>音声だけを返すのは、いまのところ <c>default</c> だけ。</b> 実測（yt-dlp 2026.08.19、3 本の動画）:
+    /// </para>
+    /// <code>
+    /// default        → 音声だけ 5〜120 本、素の GET で 206（途中の位置も、全体も取れた）
+    /// web_safari・android・ios・tv・mweb・web・web_embedded → 0 本
+    /// </code>
+    /// </summary>
+    [SpoitableSettingsLabelLocalize("videourl.settings.clients.audio.label")]
+    [SpoitableSettingsDescriptionLocalize("videourl.settings.clients.audio.description")]
+    public string Audio = "default";
 }

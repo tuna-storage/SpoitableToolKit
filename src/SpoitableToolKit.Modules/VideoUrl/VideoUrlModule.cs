@@ -250,6 +250,7 @@ public sealed class VideoUrlModule : ISpoitableModule, IUiEndpoint, IVideoEventL
             var result = await _resolver!.ResolveAsync(url, _shutdown.Token).ConfigureAwait(false);
 
             // 渡して意味があるのは音付きの 1 本。HLS が取れていればそちらの方が画質が上。
+            // 並びは HLS・mp4・音声だけの順なので、HLS が無ければ mp4 になり、音声だけの 1 本はほかに何も無いときだけ写る。
             var best = result.Streams.FirstOrDefault(s => s.Kind == "hls") ?? result.Streams[0];
 
             var copied = host.Clipboard.SetText(best.Url);

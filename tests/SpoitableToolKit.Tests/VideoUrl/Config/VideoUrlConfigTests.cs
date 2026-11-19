@@ -27,6 +27,7 @@ public sealed class VideoUrlConfigTests
     {
         Assert.Contains("web_safari", Suggestions(Item("Clients.Hls"))!);
         Assert.Contains("android", Suggestions(Item("Clients.Progressive"))!);
+        Assert.Contains("default", Suggestions(Item("Clients.Audio"))!);
     }
 
     /// <summary>答えた覚えのない項目に候補が付かないことまで見ないと、「常に返す」に書き換えても落ちない。</summary>
